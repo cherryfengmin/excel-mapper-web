@@ -1,0 +1,468 @@
+.app {
+  min-height: 100vh;
+  background: #0b1020;
+  color: #e7eaf3;
+}
+
+.app h1,
+.app h2,
+.app h3,
+.app label,
+.app p,
+.app th,
+.app td {
+  color: #e7eaf3;
+}
+
+.app code {
+  color: rgba(231, 234, 243, 0.95);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.app ::placeholder {
+  color: rgba(231, 234, 243, 0.45);
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  background: rgba(11, 16, 32, 0.72);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(231, 234, 243, 0.1);
+}
+
+.headerInner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 18px 20px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.subtle {
+  margin: 6px 0 0;
+  color: rgba(231, 234, 243, 0.72);
+  font-size: 13px;
+}
+
+.main {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 20px;
+  display: grid;
+  gap: 16px;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(231, 234, 243, 0.1);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.card h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.field label {
+  display: block;
+  font-size: 13px;
+  color: rgba(231, 234, 243, 0.9);
+  margin-bottom: 6px;
+}
+
+.fieldLabelTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fieldLabelTitle strong {
+  color: rgba(231, 234, 243, 0.98);
+  font-weight: 700;
+}
+
+.labelRequired {
+  color: #ff4d4f;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.field input[type='file'],
+.field input[type='number'],
+.field select {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1px solid rgba(231, 234, 243, 0.12);
+  background: rgba(11, 16, 32, 0.6);
+  color: #e7eaf3;
+  padding: 10px 12px;
+}
+
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1px solid rgba(231, 234, 243, 0.12);
+  background: rgba(11, 16, 32, 0.6);
+  color: #e7eaf3;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.textareaMono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.jsonPane {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 8px;
+  align-items: stretch;
+}
+
+/* 原始 / 替换后 JSON：由 rows≈行数撑开，不固定小高度；仍可纵向拖拽调整 */
+.jsonTextareaAutoHeight {
+  resize: vertical;
+  max-height: none;
+}
+
+.gutter {
+  border-radius: 10px;
+  border: 1px solid rgba(231, 234, 243, 0.12);
+  background: rgba(11, 16, 32, 0.35);
+  padding: 10px 8px;
+  color: rgba(231, 234, 243, 0.55);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow: hidden;
+  user-select: none;
+}
+
+.gutterLine {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  height: 1.55em;
+}
+
+.help {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: rgba(231, 234, 243, 0.65);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.inline input[type='number'] {
+  width: 110px;
+}
+
+.arrow {
+  color: rgba(231, 234, 243, 0.7);
+}
+
+.btn {
+  border-radius: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(231, 234, 243, 0.16);
+  background: rgba(231, 234, 243, 0.08);
+  color: #e7eaf3;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.02s ease;
+}
+
+.btn:not(:disabled):hover {
+  background: rgba(231, 234, 243, 0.12);
+  border-color: rgba(231, 234, 243, 0.28);
+}
+
+.btn:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.btnPrimary {
+  background: rgba(170, 59, 255, 0.22);
+  border-color: rgba(170, 59, 255, 0.32);
+}
+
+.btnPrimary:not(:disabled):hover {
+  background: rgba(170, 59, 255, 0.3);
+  border-color: rgba(170, 59, 255, 0.45);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+}
+
+.pill {
+  color: rgba(231, 234, 243, 0.95);
+  font-weight: 600;
+}
+
+.help code {
+  /* prevent inline code from looking like a button */
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+
+.search {
+  width: min(360px, 100%);
+  border-radius: 10px;
+  border: 1px solid rgba(231, 234, 243, 0.12);
+  background: rgba(11, 16, 32, 0.6);
+  color: #e7eaf3;
+  padding: 10px 12px;
+}
+
+.selectSlim {
+  border-radius: 10px;
+  border: 1px solid rgba(231, 234, 243, 0.12);
+  background: rgba(11, 16, 32, 0.6);
+  color: #e7eaf3;
+  padding: 10px 12px;
+  max-width: 100%;
+}
+
+.placeholder {
+  border-radius: 12px;
+  border: 1px dashed rgba(231, 234, 243, 0.18);
+  padding: 14px;
+  color: rgba(231, 234, 243, 0.7);
+  font-size: 13px;
+}
+
+/* 映射结果区：无数据时的提示框，与上方按钮拉开间距并增加内边距 */
+.placeholder.mappingAreaHint {
+  margin-top: 20px;
+  padding: 24px 22px 28px;
+  line-height: 1.65;
+}
+
+.tableWrap {
+  margin-top: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(231, 234, 243, 0.12);
+  overflow: auto;
+  max-height: 520px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 860px;
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  background: rgba(11, 16, 32, 0.92);
+  backdrop-filter: blur(8px);
+  text-align: left;
+  font-size: 12px;
+  color: rgba(231, 234, 243, 0.72);
+  padding: 10px 10px;
+  border-bottom: 1px solid rgba(231, 234, 243, 0.12);
+  z-index: 1;
+}
+
+.table tbody td {
+  padding: 10px 10px;
+  border-bottom: 1px solid rgba(231, 234, 243, 0.06);
+  vertical-align: top;
+  font-size: 13px;
+}
+
+.mono {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  color: rgba(231, 234, 243, 0.85);
+  white-space: nowrap;
+}
+
+.cell {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgba(231, 234, 243, 0.92);
+}
+
+.notes {
+  color: rgba(231, 234, 243, 0.65);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-radius: 999px;
+  display: inline-block;
+  border: 1px solid rgba(231, 234, 243, 0.14);
+  white-space: nowrap;
+}
+
+.badge_OK {
+  background: rgba(46, 204, 113, 0.12);
+  color: rgba(180, 255, 210, 0.95);
+}
+
+.badge_NEED_REVIEW {
+  background: rgba(241, 196, 15, 0.12);
+  color: rgba(255, 235, 170, 0.95);
+}
+
+.badge_UNMATCHED {
+  background: rgba(230, 126, 34, 0.12);
+  color: rgba(255, 210, 170, 0.95);
+}
+
+.badge_ERROR {
+  background: rgba(231, 76, 60, 0.12);
+  color: rgba(255, 190, 185, 0.95);
+}
+
+.toast {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(231, 234, 243, 0.14);
+  background: rgba(46, 204, 113, 0.12);
+  color: rgba(180, 255, 210, 0.95);
+  font-size: 13px;
+}
+
+.unmatched {
+  margin-top: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(231, 234, 243, 0.12);
+  background: rgba(11, 16, 32, 0.35);
+  padding: 10px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.unmatchedItem {
+  font-size: 12px;
+  color: rgba(231, 234, 243, 0.75);
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(231, 234, 243, 0.06);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.unmatchedItem:last-child {
+  border-bottom: none;
+}
+
+.codeBox {
+  margin: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(231, 234, 243, 0.12);
+  background: rgba(11, 16, 32, 0.6);
+  color: #e7eaf3;
+  padding: 10px 12px;
+  overflow: auto;
+  max-height: 360px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.codeLine {
+  white-space: pre;
+}
+
+.hl {
+  background: rgba(46, 204, 113, 0.22);
+  color: rgba(220, 255, 235, 0.98);
+  padding: 0 2px;
+  border-radius: 4px;
+}
+
+.dimLine {
+  color: rgba(231, 234, 243, 0.45);
+}
+
+.dimLine .hl {
+  /* still visible but muted */
+  background: rgba(46, 204, 113, 0.14);
+  color: rgba(220, 255, 235, 0.85);
+}
+
+.kvs {
+  display: grid;
+  gap: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(231, 234, 243, 0.12);
+  background: rgba(11, 16, 32, 0.35);
+  padding: 12px;
+}
+
+.kvs > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.kvs .k {
+  color: rgba(231, 234, 243, 0.72);
+}
+
+.kvs .v {
+  color: rgba(231, 234, 243, 0.95);
+  font-variant-numeric: tabular-nums;
+}
