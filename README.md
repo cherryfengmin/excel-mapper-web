@@ -48,6 +48,18 @@ npm run build
 npm run preview
 ```
 
+## GitHub Pages（子路径）
+
+本仓库 `vite.config.ts` 中 `base` 为 **`/excel-mapper-web/`**，对应「用户名下的项目站」地址：
+
+`https://<你的 GitHub 用户名>.github.io/excel-mapper-web/`
+
+1. **仓库名**需为 `excel-mapper-web`（与 `base` 路径一致）。若仓库名不同，请把 `vite.config.ts` 里的 `base` 改成 `'/<仓库名>/'`（前后都要有 `/`），再重新构建部署。
+2. 打开仓库 **Settings → Pages**，**Build and deployment** 里 **Source** 选 **GitHub Actions**（不要选 Deploy from a branch，除非你自己改成分支发布）。
+3. 将代码推送到 **`main` 或 `master`**，或手动运行 **Actions → Deploy static content to Pages → Run workflow**。完成后在上一步 Pages 设置里可看到站点 URL。
+
+本地预览与线上一致的子路径：先 `npm run build`，再 `npm run preview`，按终端提示打开（会沿用 `vite.config.ts` 里的 `base`）。
+
 ## 常见问题
 
 ### 为什么点“应用映射”后 JSON 没变化？

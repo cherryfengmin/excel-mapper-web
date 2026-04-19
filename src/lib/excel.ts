@@ -1,14 +1,25 @@
-import * as XLSX from 'xlsx'
+import type { WorkSheet } from 'xlsx'
+
+/** 延迟加载 xlsx（体积大），仅在读取/解析工作表时拉取，减小首屏 JS。 */
+let xlsxMod: typeof import('xlsx') | null = null
+
+async function loadXlsx(): Promise<typeof import('xlsx')> {
+  if (!xlsxMod) {
+    xlsxMod = await import('xlsx')
+  }
+  return xlsxMod
+}
 
 export type ExcelWorkbook = {
   sheetNames: string[]
-  sheets: Record<string, XLSX.WorkSheet>
+  sheets: Record<string, WorkSheet>
 }
 
 export async function readXlsxFile(file: File): Promise<ExcelWorkbook> {
+  const XLSX = await loadXlsx()
   const buf = await file.arrayBuffer()
   const wb = XLSX.read(buf, { type: 'array' })
-  const sheets: Record<string, XLSX.WorkSheet> = {}
+  const sheets: Record<string, WorkSheet> = {}
   for (const name of wb.SheetNames) {
     const ws = wb.Sheets[name]
     if (ws) sheets[name] = ws
@@ -18,7 +29,11 @@ export async function readXlsxFile(file: File): Promise<ExcelWorkbook> {
 
 export type SheetMatrix = (string | number | boolean | null)[][]
 
-export function sheetToMatrix(ws: XLSX.WorkSheet): SheetMatrix {
+export function sheetToMatrix(ws: WorkSheet): SheetMatrix {
+  const XLSX = xlsxMod
+  if (!XLSX) {
+    throw new Error('内部错误：xlsx 尚未加载，请先成功打开一次 Excel 文件')
+  }
   // header: 1 -> array-of-arrays, raw: false -> formatted text where possible
   return XLSX.utils.sheet_to_json(ws, { header: 1, raw: false }) as SheetMatrix
 }

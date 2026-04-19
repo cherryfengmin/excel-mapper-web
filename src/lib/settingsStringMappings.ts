@@ -1,4 +1,4 @@
-type BuildResult =
+export type BuildSettingsStringMappingsResult =
   | { ok: true; mappings: Record<string, string>; stats: { pairs: number; used: number; skippedKeys: number } }
   | { ok: false; error: string }
 
@@ -19,13 +19,16 @@ function shouldSkipKey(key: string): boolean {
   return SKIP_KEYS_RE.some((re) => re.test(key))
 }
 
-export function buildSettingsStringMappings(srcJsonText: string, dstJsonText: string): BuildResult {
+export function buildSettingsStringMappings(
+  srcJsonText: string,
+  dstJsonText: string
+): BuildSettingsStringMappingsResult {
   let src: any
   let dst: any
   try {
     src = JSON.parse(srcJsonText)
   } catch (e) {
-    return { ok: false, error: `原始 JSON 解析失败：${e instanceof Error ? e.message : String(e)}` }
+    return { ok: false as const, error: `原始 JSON 解析失败：${e instanceof Error ? e.message : String(e)}` }
   }
   try {
     dst = JSON.parse(dstJsonText)
@@ -48,7 +51,7 @@ export function buildSettingsStringMappings(srcJsonText: string, dstJsonText: st
     }
   }, stats)
 
-  return { ok: true, mappings, stats }
+  return { ok: true as const, mappings, stats }
 }
 
 function walkTogether(

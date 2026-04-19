@@ -12,6 +12,10 @@ export type ReplaceStats = {
   replacements: Array<{ before: string; after: string }>
 }
 
+export type ReplaceJsonSettingsResult =
+  | { ok: true; output: string; stats: ReplaceStats }
+  | { ok: false; error: string }
+
 export type ReplaceOptions = {
   enableSubstringMatch: boolean
   maxUnmatchedSamples: number
@@ -48,14 +52,14 @@ export function replaceJsonSettings(
   jsonText: string,
   dict: BuiltDictionary,
   options?: Partial<ReplaceOptions>
-): { ok: true; output: string; stats: ReplaceStats } | { ok: false; error: string } {
+): ReplaceJsonSettingsResult {
   const opts: ReplaceOptions = { ...DEFAULT_OPTS, ...(options ?? {}) }
 
   let root: any
   try {
     root = JSON.parse(jsonText)
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    return { ok: false as const, error: e instanceof Error ? e.message : String(e) }
   }
 
   const stats: ReplaceStats = {
@@ -70,7 +74,7 @@ export function replaceJsonSettings(
   }
 
   if (!root || typeof root !== 'object') {
-    return { ok: true, output: JSON.stringify(root, null, 2), stats }
+    return { ok: true as const, output: JSON.stringify(root, null, 2), stats }
   }
 
   // Replace any nested `settings` nodes in the whole JSON tree.
@@ -82,7 +86,7 @@ export function replaceJsonSettings(
     root = walk(root, dict, stats, opts)
   }
 
-  return { ok: true, output: JSON.stringify(root, null, 2), stats }
+  return { ok: true as const, output: JSON.stringify(root, null, 2), stats }
 }
 
 function walk(node: any, dict: BuiltDictionary, stats: ReplaceStats, opts: ReplaceOptions): any {

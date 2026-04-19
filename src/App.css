@@ -69,6 +69,18 @@
   font-size: 16px;
 }
 
+.card h2.mappingResultTitle {
+  margin: 0 0 8px;
+}
+
+.mappingResultHelp {
+  margin: 0 0 12px;
+}
+
+.mappingResultToolbar {
+  width: 100%;
+}
+
 .cardHeader {
   display: flex;
   align-items: center;
@@ -380,12 +392,6 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 8px;
-  padding: 4px;
-  border-radius: 6px;
-}
-
-.cellContent.copied {
-  background: rgba(255, 235, 59, 0.2);
 }
 
 .cellContent span {

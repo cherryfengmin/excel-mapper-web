@@ -21,7 +21,6 @@ import {
   casefoldCollapseWhitespace,
 } from './lib/dictionary'
 import { replaceJsonSettings } from './lib/jsonSettingsReplace'
-import { buildSettingsStringMappings } from './lib/settingsStringMappings'
 import { decodeHtmlEntities, stripHtmlTags } from './lib/html'
 
 /** JSON 编辑区：textarea（无行号） */
@@ -68,7 +67,6 @@ function App() {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'OK' | 'NEED_REVIEW' | 'ERROR' | 'UNMATCHED'>('ALL')
   const [unmatchedQuery, setUnmatchedQuery] = useState('')
-  const [copiedCells, setCopiedCells] = useState<Set<string>>(new Set())
 
   const [loadError, setLoadError] = useState<string>('')
   const [mappingRecords, setMappingRecords] = useState<MappingRecord[]>([])
@@ -94,7 +92,7 @@ function App() {
   const [jsonDirection, setJsonDirection] = useState<'auto' | 'srcToDst' | 'dstToSrc'>('auto')
   const [jsonDictInfo, setJsonDictInfo] = useState<{ size: number; collisions: number } | null>(null)
   const [jsonAppliedDirection, setJsonAppliedDirection] = useState<'srcToDst' | 'dstToSrc' | ''>('')
-  const [jsonReplacements, setJsonReplacements] = useState<Array<{ before: string; after: string }>>([])
+  const [jsonReplBefore, setJsonReplBefore] = useState<string[]>([])
 
   const headerRow = useMemo(() => (matrix && matrix.length ? matrix[0] ?? [] : []), [matrix])
   const srcHeaderName = useMemo(() => {
@@ -119,7 +117,10 @@ function App() {
 
   const fileName = file?.name ?? ''
 
-  async function onPickFile(next: File | null) {
+  /** 通过「从磁盘选取」绑定时，每次 getFile() 可读到用户保存后的最新 xlsx；普通文件框选中的 File 多为快照，保存后不会变。 */
+  const excelFileHandleRef = useRef<FileSystemFileHandle | null>(null)
+
+  async function onPickFile(next: File | null, bindFileHandle?: FileSystemFileHandle) {
     setLoadError('')
     setFile(next)
     setWorkbook(null)
@@ -129,6 +130,7 @@ function App() {
     setDstCol(null)
     setMappingRecords([])
     setIsDirty(false)
+    excelFileHandleRef.current = null
 
     if (!next) return
 
@@ -141,7 +143,41 @@ function App() {
         const m = sheetToMatrix(wb.sheets[first])
         setMatrix(m)
       }
+      if (bindFileHandle) {
+        excelFileHandleRef.current = bindFileHandle
+      }
     } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function onPickExcelWithFileHandle() {
+    const win = window as unknown as {
+      showOpenFilePicker?: (options: {
+        types?: Array<{ description: string; accept: Record<string, string[]> }>
+        multiple?: boolean
+      }) => Promise<FileSystemFileHandle[]>
+    }
+    if (typeof window === 'undefined' || typeof win.showOpenFilePicker !== 'function') {
+      setLoadError(
+        '当前浏览器不支持绑定磁盘文件。若在 Excel 中保存后此处数据不变，请重新用上方「选择文件」再选一次该 xlsx。'
+      )
+      return
+    }
+    try {
+      const [handle] = await win.showOpenFilePicker({
+        types: [
+          {
+            description: 'Excel 工作簿',
+            accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] },
+          },
+        ],
+        multiple: false,
+      })
+      const f = await handle.getFile()
+      await onPickFile(f, handle)
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return
       setLoadError(e instanceof Error ? e.message : String(e))
     }
   }
@@ -175,25 +211,43 @@ function App() {
 
   const canUpdate = !!matrix && srcCol !== null && dstCol !== null
 
-  async function onUpdateDocument() {
+  /** 从当前 Excel 文件与列设置重新加载工作表并生成映射。返回是否成功完成映射刷新。 */
+  async function onUpdateDocument(): Promise<boolean> {
     setLoadError('')
-    if (!canUpdate) return
+    if (!canUpdate) return false
 
-    // Re-parse from selected file (useful if user re-selected a modified file)
-    if (file) {
+    let m: SheetMatrix | null = matrix
+
+    let bytesFile: File | null = file
+    if (excelFileHandleRef.current) {
       try {
-        const wb = await readXlsxFile(file)
-        setWorkbook(wb)
-        const ws = wb.sheets[sheetName] ?? wb.sheets[wb.sheetNames[0] ?? '']
-        if (ws) setMatrix(sheetToMatrix(ws))
+        bytesFile = await excelFileHandleRef.current.getFile()
+        setFile(bytesFile)
       } catch (e) {
         setLoadError(e instanceof Error ? e.message : String(e))
-        return
+        return false
       }
     }
 
-    const m = matrix
-    if (!m || srcCol === null || dstCol === null) return
+    if (bytesFile) {
+      try {
+        const wb = await readXlsxFile(bytesFile)
+        setWorkbook(wb)
+        const ws = wb.sheets[sheetName] ?? wb.sheets[wb.sheetNames[0] ?? '']
+        if (!ws) {
+          setMatrix(null)
+          setMappingRecords([])
+          return false
+        }
+        m = sheetToMatrix(ws)
+        setMatrix(m)
+      } catch (e) {
+        setLoadError(e instanceof Error ? e.message : String(e))
+        return false
+      }
+    }
+
+    if (!m || srcCol === null || dstCol === null) return false
 
     const startIdx0 = Math.max(0, startRow - 1)
     const out: MappingRecord[] = []
@@ -212,6 +266,7 @@ function App() {
     }
     setMappingRecords(out)
     setIsDirty(false)
+    return true
   }
 
   const filteredRecords = useMemo(() => {
@@ -283,8 +338,8 @@ function App() {
     }
 
     const replacementVariants = Array.from(
-      jsonReplacements.reduce((set: Set<string>, replacement) => {
-        for (const variant of buildVariants(replacement.before)) {
+      jsonReplBefore.reduce<Set<string>>((set, rawBefore) => {
+        for (const variant of buildVariants(rawBefore)) {
           set.add(variant)
         }
         return set
@@ -317,7 +372,7 @@ function App() {
       if (!jsonInputNorm.includes(normalizeText(before))) return false
       return !rowIsMatched(before)
     })
-  }, [jsonStats, jsonReplacements, jsonAppliedDirection, mappingRecords, jsonInput])
+  }, [jsonStats, jsonReplBefore, jsonAppliedDirection, mappingRecords, jsonInput])
 
   const filteredUnmatchedMappings = useMemo(() => {
     const q = unmatchedQuery.trim().toLowerCase()
@@ -347,7 +402,7 @@ function App() {
           <div>
             <h1>Excel 翻译映射</h1>
             <p className="subtle">
-              上传 xlsx，选择两列做映射，生成 <code>"EN"：“DE”</code> 可复制列表
+              上传 xlsx，选择两列做映射，生成 <code>"EN"："DE"</code>数据，替换json翻译。
             </p>
           </div>
         </div>
@@ -367,15 +422,20 @@ function App() {
                 </span>
                 <strong>Excel 文件（.xlsx）</strong>
               </label>
-              <input
-                id="file"
-                type="file"
-                accept=".xlsx"
-                onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
-              />
+              <div className="row" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+                <input
+                  id="file"
+                  type="file"
+                  accept=".xlsx"
+                  onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
+                />
+                <button type="button" className="btn btnSmall" onClick={() => void onPickExcelWithFileHandle()}>
+                  从磁盘选取（保存后可刷新）
+                </button>
+              </div>
               {fileName ? <p className="help">已选择：{fileName}</p> : null}
               <p className="help">
-                纯前端解析：不上传服务器；目前仅基于文本、真实换行与条目标记做切分。
+                纯前端解析：不上传服务器；目前仅基于文本、真实换行与条目标记做切分。若在 Excel 里保存后希望「刷新映射」读到最新内容，请用下方按钮选取文件（浏览器会绑定磁盘文件）；仅用上方文件框时，部分浏览器仍保留旧快照，需重新选择一次文件。
               </p>
               {loadError ? <p className="help">解析失败：{loadError}</p> : null}
             </div>
@@ -540,7 +600,7 @@ function App() {
               选择好两列与条目标记（如 <code>*</code>、<code>•</code>、<code>[Icon]</code>）后，点击下方生成映射表。
             </p>
             <div className="row" style={{ marginTop: 10, justifyContent: 'center' }}>
-              <button className="btn btnPrimary" disabled={!canUpdate} onClick={onUpdateDocument}>
+              <button className="btn btnPrimary" disabled={!canUpdate} onClick={() => void onUpdateDocument()}>
                 输出映射
               </button>
             </div>
@@ -548,91 +608,96 @@ function App() {
         </section>
 
         <section className="card">
-          <div className="cardHeader">
-            <h2>2) 映射结果</h2>
-            <div className="row">
-              <input
-                className="search"
-                placeholder="搜索（EN/DE/notes）"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-              <select
-                className="selectSlim"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-              >
-                <option value="ALL">全部</option>
-                <option value="OK">OK</option>
-                <option value="NEED_REVIEW">NEED_REVIEW</option>
-                <option value="UNMATCHED">UNMATCHED</option>
-                <option value="ERROR">ERROR</option>
-              </select>
-              <button
-                className="btn"
-                disabled={!canCopy}
-                onClick={async () => {
-                  const text = buildQuotePairs(filteredRecords)
-                  await navigator.clipboard.writeText(text)
-                  setCopyToast('复制成功')
-                  window.setTimeout(() => setCopyToast(''), 1500)
-                }}
-              >
-                复制为 “EN：DE”
-              </button>
-              <button
-                className="btn"
-                disabled={!canExportFieldsJson}
-                onClick={() => {
-                  const pairs: Record<string, string> = {}
-                  for (const r of filteredRecords) {
-                    if (r.row_status !== 'OK' || r.segment_status !== 'OK') continue
-                    if (!r.src_text || !r.dst_text) continue
-                    // last write wins if duplicates exist
-                    pairs[r.src_text] = r.dst_text
-                  }
-                  const payload = {
-                    sourceColumn: srcHeaderName || '源列',
-                    targetColumn: dstHeaderName || '目标列',
-                    generatedAt: new Date().toISOString(),
-                    count: Object.keys(pairs).length,
-                    mappings: pairs,
-                  }
-                  setFieldsJson(JSON.stringify(payload, null, 2))
-                  setFieldsJsonToast('已生成字段json')
-                  window.setTimeout(() => setFieldsJsonToast(''), 1500)
-                }}
-              >
-                输出字段json
-              </button>
-              <button
-                className="btn"
-                disabled={!jsonInput.trim() || !jsonOutputEdited.trim()}
-                onClick={() => {
-                  const res = buildSettingsStringMappings(jsonInput, jsonOutputEdited)
-                  if (!res.ok) {
-                    setFieldsJsonToast(res.error)
-                    window.setTimeout(() => setFieldsJsonToast(''), 2500)
-                    return
-                  }
-
-                  const payload = {
-                    sourceColumn: srcHeaderName || '源列',
-                    targetColumn: dstHeaderName || '目标列',
-                    generatedAt: new Date().toISOString(),
-                    count: Object.keys(res.mappings).length,
-                    mappings: res.mappings,
-                    alignStats: res.stats,
-                  }
-
-                  setFieldsJson(JSON.stringify(payload, null, 2))
-                  setFieldsJsonToast('字段json已更新')
-                  window.setTimeout(() => setFieldsJsonToast(''), 1500)
-                }}
-              >
-                更新字段json
-              </button>
-            </div>
+          <h2 className="mappingResultTitle">2) 映射结果</h2>
+          <ul className="help mappingResultHelp">
+            <li>
+            使用说明：处理非ok状态的记录，处理方法是去对应到excel表里找到对比到两格内容，找到有问题的那条内容，前/后点一下换行按钮，需要同时修改原列跟目标列，保证两个格子内容通过换行或者空行划分到段落的顺序跟数量一致。当处理完后则可进行下一步。
+            </li>
+            <li>
+            对于修改了 Excel 后仍存在非 OK 的记录，只能在第三步「应用映射」得到替换后的 JSON 基础上人工排查替换。第三步应用映射后会输出未应用的映射表，可按表上记录逐条处理。
+          </li>
+          </ul>
+          <div className="row mappingResultToolbar">
+            <input
+              className="search"
+              placeholder="搜索（EN/DE/notes）"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <select
+              className="selectSlim"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            >
+              <option value="ALL">全部</option>
+              <option value="OK">OK</option>
+              <option value="NEED_REVIEW">NEED_REVIEW</option>
+              <option value="UNMATCHED">UNMATCHED</option>
+              <option value="ERROR">ERROR</option>
+            </select>
+            <button
+              className="btn"
+              disabled={!canCopy}
+              onClick={async () => {
+                const text = buildQuotePairs(filteredRecords)
+                await navigator.clipboard.writeText(text)
+                setCopyToast('复制成功')
+                window.setTimeout(() => setCopyToast(''), 1500)
+              }}
+            >
+              复制为 “EN：DE”
+            </button>
+            <button
+              className="btn"
+              disabled={!canExportFieldsJson}
+              onClick={() => {
+                const pairs: Record<string, string> = {}
+                for (const r of filteredRecords) {
+                  if (r.row_status !== 'OK' || r.segment_status !== 'OK') continue
+                  if (!r.src_text || !r.dst_text) continue
+                  pairs[r.src_text] = r.dst_text
+                }
+                const payload = {
+                  sourceColumn: srcHeaderName || '源列',
+                  targetColumn: dstHeaderName || '目标列',
+                  generatedAt: new Date().toISOString(),
+                  count: Object.keys(pairs).length,
+                  mappings: pairs,
+                }
+                setFieldsJson(JSON.stringify(payload, null, 2))
+                setFieldsJsonToast('已生成字段json')
+                window.setTimeout(() => setFieldsJsonToast(''), 1500)
+              }}
+            >
+              输出字段json
+            </button>
+            <button
+              className="btn"
+              type="button"
+              disabled={!canUpdate || !file}
+              title={
+                !file
+                  ? '请先上传 Excel 文件'
+                  : !canUpdate
+                    ? '请先完成列映射与起始行设置'
+                    : excelFileHandleRef.current
+                      ? '从磁盘读取最新 xlsx 并重新生成映射'
+                      : '按当前内存中的文件重新生成映射；要读取磁盘上刚保存的修改，请用「从磁盘选取」绑定文件'
+              }
+              onClick={async () => {
+                const ok = await onUpdateDocument()
+                if (ok) {
+                  setFieldsJsonToast(
+                    excelFileHandleRef.current
+                      ? '已从磁盘读取最新 Excel 并刷新映射'
+                      : '已按当前文件与设置重新生成映射（若 Excel 已保存但无变化，请用「从磁盘选取」绑定文件）'
+                  )
+                  window.setTimeout(() => setFieldsJsonToast(''), 3000)
+                }
+              }}
+            >
+              刷新映射
+            </button>
           </div>
           {copyToast ? <div className="toast">{copyToast}</div> : null}
           {fieldsJsonToast ? <div className="toast">{fieldsJsonToast}</div> : null}
@@ -672,13 +737,12 @@ function App() {
                           <td className="mono">{r.block_index}</td>
                           <td className="mono">{r.item_index}</td>
                           <td className="cell">
-                            <div className={`cellContent ${copiedCells.has(`${r.row_id}-${r.block_index}-${r.item_index}-src`) ? 'copied' : ''}`}>
+                            <div className="cellContent">
                               <span>{r.src_text}</span>
                               <button
                                 className="copyIcon"
                                 onClick={async () => {
                                   await navigator.clipboard.writeText(r.src_text)
-                                  setCopiedCells(prev => new Set([...prev, `${r.row_id}-${r.block_index}-${r.item_index}-src`]))
                                   setCopyToast('源文本已复制')
                                   window.setTimeout(() => setCopyToast(''), 1500)
                                 }}
@@ -689,13 +753,12 @@ function App() {
                             </div>
                           </td>
                           <td className="cell">
-                            <div className={`cellContent ${copiedCells.has(`${r.row_id}-${r.block_index}-${r.item_index}-dst`) ? 'copied' : ''}`}>
+                            <div className="cellContent">
                               <span>{r.dst_text}</span>
                               <button
                                 className="copyIcon"
                                 onClick={async () => {
                                   await navigator.clipboard.writeText(r.dst_text)
-                                  setCopiedCells(prev => new Set([...prev, `${r.row_id}-${r.block_index}-${r.item_index}-dst`]))
                                   setCopyToast('目标文本已复制')
                                   window.setTimeout(() => setCopyToast(''), 1500)
                                 }}
@@ -770,7 +833,7 @@ function App() {
                   setJsonError('')
                   setJsonToast('')
                   setJsonUnmatchedSamples([])
-                  setJsonReplacements([])
+                  setJsonReplBefore([])
                   setJsonDictInfo(null)
                   setJsonAppliedDirection('')
 
@@ -813,11 +876,11 @@ function App() {
 
                   const res = best.res
 
-                  if (!res.ok) {
+                  if (res.ok === false) {
                     setJsonError(res.error)
                     setJsonOutputEdited('')
                     setJsonStats(null)
-                    setJsonReplacements([])
+                    setJsonReplBefore([])
                     return
                   }
 
@@ -831,7 +894,9 @@ function App() {
                     settingsNodes: res.stats.settingsNodes,
                   })
                   setJsonUnmatchedSamples(res.stats.unmatchedSamples)
-                  setJsonReplacements(res.stats.replacements)
+
+                  const uniq = <T,>(arr: T[]) => Array.from(new Set(arr))
+                  setJsonReplBefore(uniq(res.stats.replacements.map((x) => x.before)).filter(Boolean))
 
                   if (res.stats.replaced === 0) {
                     setJsonToast(
@@ -861,7 +926,7 @@ function App() {
                   setJsonOutputEdited('')
                   setJsonError('')
                   setJsonStats(null)
-                  setJsonReplacements([])
+                  setJsonReplBefore([])
                 }}
               >
                 清空
@@ -961,13 +1026,12 @@ function App() {
                             <td className="mono">{idx + 1}</td>
                             <td className="mono">{r.row_id}</td>
                             <td className="cell">
-                              <div className={`cellContent ${copiedCells.has(`${r.row_id}-${r.block_index}-${r.item_index}-src`) ? 'copied' : ''}`}>
+                              <div className="cellContent">
                                 <span>{r.src_text}</span>
                                 <button
                                   className="copyIcon"
                                   onClick={async () => {
                                     await navigator.clipboard.writeText(r.src_text)
-                                    setCopiedCells(prev => new Set([...prev, `${r.row_id}-${r.block_index}-${r.item_index}-src`]))
                                     setCopyToast('源文本已复制')
                                     window.setTimeout(() => setCopyToast(''), 1500)
                                   }}
@@ -978,13 +1042,12 @@ function App() {
                               </div>
                             </td>
                             <td className="cell">
-                              <div className={`cellContent ${copiedCells.has(`${r.row_id}-${r.block_index}-${r.item_index}-dst`) ? 'copied' : ''}`}>
+                              <div className="cellContent">
                                 <span>{r.dst_text}</span>
                                 <button
                                   className="copyIcon"
                                   onClick={async () => {
                                     await navigator.clipboard.writeText(r.dst_text)
-                                    setCopiedCells(prev => new Set([...prev, `${r.row_id}-${r.block_index}-${r.item_index}-dst`]))
                                     setCopyToast('目标文本已复制')
                                     window.setTimeout(() => setCopyToast(''), 1500)
                                   }}
