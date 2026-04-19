@@ -1,4 +1,4 @@
-import { decodeHtmlEntities, rebuildHtml, tokenizeHtml } from './html'
+import { decodeHtmlEntities, rebuildHtml, tokenizeHtml, stripHtmlTags } from './html'
 import { lookupBest, type BuiltDictionary, normalizeText } from './dictionary'
 
 export type ReplaceStats = {
@@ -188,7 +188,16 @@ function replaceStringSmart(input: string, dict: BuiltDictionary, stats: Replace
       recordReplacement(stats, raw, replaced)
       return replaced
     }
-    // if cannot confidently replace, fall through to plain match on full text
+    // if cannot confidently replace, try matching stripped version
+    const stripped = stripHtmlTags(raw)
+    const mStrip = lookupBest(dict, stripped)
+    if (mStrip.found) {
+      stats.replaced += 1
+      if (mStrip.kind !== 'exact') stats.review += 1
+      recordReplacement(stats, raw, mStrip.value)
+      return mStrip.value
+    }
+    // fall through to plain match on full text
   }
 
   // Direct lookup variants
@@ -207,6 +216,7 @@ function replaceStringSmart(input: string, dict: BuiltDictionary, stats: Replace
       stats.replaced += 1
       stats.review += 1
       recordReplacement(stats, raw, sub.value)
+      if (sub.matchedNeedle) recordReplacement(stats, sub.matchedNeedle, sub.value)
       return sub.value
     }
   }
@@ -319,7 +329,7 @@ function shouldSkipTechnical(value: string, opts: ReplaceOptions): boolean {
   return false
 }
 
-function replaceByUniqueSubstring(input: string, dict: BuiltDictionary): { replaced: boolean; value: string } {
+function replaceByUniqueSubstring(input: string, dict: BuiltDictionary): { replaced: boolean; value: string; matchedNeedle?: string } {
   // Conservative substring replacement:
   // - Only when input has no tags/entities (so we can safely mutate raw string)
   // - Only when there is exactly one candidate needle with word-ish boundary
@@ -356,7 +366,7 @@ function replaceByUniqueSubstring(input: string, dict: BuiltDictionary): { repla
   if (!re.test(input)) return { replaced: false, value: input }
 
   const next = input.replace(re, `$1${matchValue}$3`)
-  return { replaced: next !== input, value: next }
+  return { replaced: next !== input, value: next, matchedNeedle: matchNeedle }
 }
 
 function escapeRegExp(s: string): string {

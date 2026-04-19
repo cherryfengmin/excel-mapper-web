@@ -81,6 +81,11 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+  width: 100%;
+}
+
+.grid2 > * {
+  min-width: 0;
 }
 
 @media (max-width: 900px) {
@@ -154,7 +159,8 @@
 /* 原始 / 替换后 JSON：由 rows≈行数撑开，不固定小高度；仍可纵向拖拽调整 */
 .jsonTextareaAutoHeight {
   resize: vertical;
-  max-height: none;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .gutter {
@@ -240,6 +246,11 @@
   opacity: 0.5;
 }
 
+.btnSmall {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
 .pill {
   color: rgba(231, 234, 243, 0.95);
   font-weight: 600;
@@ -289,7 +300,9 @@
   margin-top: 10px;
   border-radius: 12px;
   border: 1px solid rgba(231, 234, 243, 0.12);
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
+  max-width: 100%;
   max-height: 520px;
 }
 
@@ -297,8 +310,36 @@
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  min-width: 860px;
+  min-width: 0;
+  table-layout: fixed;
 }
+
+.unmatchedTableTitle {
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.unmatchedTable th:nth-child(-n+2),
+.unmatchedTable td:nth-child(-n+2) {
+  width: 56px;
+  max-width: 56px;
+  min-width: 48px;
+}
+
+.table thead th:nth-child(-n+4),
+.table tbody td:nth-child(-n+4) {
+  width: 56px;
+  max-width: 56px;
+  min-width: 48px;
+}
+
+.table tbody td,
+.table thead th {
+  word-break: break-word;
+}
+
 
 .table thead th {
   position: sticky;
@@ -332,6 +373,41 @@
   white-space: pre-wrap;
   word-break: break-word;
   color: rgba(231, 234, 243, 0.92);
+}
+
+.cellContent {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px;
+  border-radius: 6px;
+}
+
+.cellContent.copied {
+  background: rgba(255, 235, 59, 0.2);
+}
+
+.cellContent span {
+  flex: 1;
+  min-width: 0;
+}
+
+.copyIcon {
+  background: none;
+  border: none;
+  color: rgba(231, 234, 243, 0.5);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1;
+  transition: color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.copyIcon:hover {
+  color: rgba(231, 234, 243, 0.8);
 }
 
 .notes {

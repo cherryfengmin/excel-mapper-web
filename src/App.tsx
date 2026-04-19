@@ -11,15 +11,23 @@ import {
   type SheetMatrix,
 } from './lib/excel'
 import { buildMappingsFromRow, buildQuotePairs, type MappingRecord } from './lib/mapping'
-import { buildDictionaryFromMappings } from './lib/dictionary'
+import {
+  buildDictionaryFromMappings,
+  normalizeText,
+  normalizeLoose,
+  normalizeCollapseWhitespace,
+  casefold,
+  casefoldLoose,
+  casefoldCollapseWhitespace,
+} from './lib/dictionary'
 import { replaceJsonSettings } from './lib/jsonSettingsReplace'
 import { buildSettingsStringMappings } from './lib/settingsStringMappings'
+import { decodeHtmlEntities, stripHtmlTags } from './lib/html'
 
-/** JSON 编辑区：行号 + textarea（无行级黄底高亮） */
+/** JSON 编辑区：textarea（无行号） */
 function JsonGutterTextarea(props: {
   value: string
   onChange: (next: string) => void
-  lineCount: number
   placeholder?: string
   rows?: number
   textareaClassName?: string
@@ -34,24 +42,15 @@ function JsonGutterTextarea(props: {
   }
 
   return (
-    <div className="jsonPane">
-      <div className="gutter" aria-hidden="true">
-        {Array.from({ length: props.lineCount }, (_, i) => (
-          <div key={i} className="gutterLine">
-            {i + 1}
-          </div>
-        ))}
-      </div>
-      <textarea
-        ref={setTextareaRef}
-        className={`textarea textareaMono${props.textareaClassName ? ` ${props.textareaClassName}` : ''}`}
-        rows={rows}
-        value={props.value}
-        onChange={(e) => props.onChange(e.target.value)}
-        placeholder={props.placeholder}
-        onPaste={props.onPaste ? () => props.onPaste?.() : undefined}
-      />
-    </div>
+    <textarea
+      ref={setTextareaRef}
+      className={`textarea textareaMono${props.textareaClassName ? ` ${props.textareaClassName}` : ''}`}
+      rows={rows}
+      value={props.value}
+      onChange={(e) => props.onChange(e.target.value)}
+      placeholder={props.placeholder}
+      onPaste={props.onPaste ? () => props.onPaste?.() : undefined}
+    />
   )
 }
 
@@ -68,6 +67,8 @@ function App() {
   const [markerPrefixesText, setMarkerPrefixesText] = useState('*\n•\n-\n[Icon]\n[Symbol]')
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'OK' | 'NEED_REVIEW' | 'ERROR' | 'UNMATCHED'>('ALL')
+  const [unmatchedQuery, setUnmatchedQuery] = useState('')
+  const [copiedCells, setCopiedCells] = useState<Set<string>>(new Set())
 
   const [loadError, setLoadError] = useState<string>('')
   const [mappingRecords, setMappingRecords] = useState<MappingRecord[]>([])
@@ -93,10 +94,7 @@ function App() {
   const [jsonDirection, setJsonDirection] = useState<'auto' | 'srcToDst' | 'dstToSrc'>('auto')
   const [jsonDictInfo, setJsonDictInfo] = useState<{ size: number; collisions: number } | null>(null)
   const [jsonAppliedDirection, setJsonAppliedDirection] = useState<'srcToDst' | 'dstToSrc' | ''>('')
-  const [jsonPrettyInput, setJsonPrettyInput] = useState<string>('')
-  const [jsonPrettyOutput, setJsonPrettyOutput] = useState<string>('')
-  const [jsonReplBefore, setJsonReplBefore] = useState<string[]>([])
-  const [jsonReplAfter, setJsonReplAfter] = useState<string[]>([])
+  const [jsonReplacements, setJsonReplacements] = useState<Array<{ before: string; after: string }>>([])
 
   const headerRow = useMemo(() => (matrix && matrix.length ? matrix[0] ?? [] : []), [matrix])
   const srcHeaderName = useMemo(() => {
@@ -246,6 +244,89 @@ function App() {
     () => Math.max(1, (jsonOutputEdited.match(/\n/g) ?? []).length + 1),
     [jsonOutputEdited]
   )
+
+  const jsonUnmatchedMappings = useMemo(() => {
+    if (!jsonStats || !jsonAppliedDirection) return []
+
+    const jsonInputNorm = normalizeText(jsonInput)
+
+    const buildVariants = (value: string) => {
+      const decoded = decodeHtmlEntities(value)
+      const stripped = stripHtmlTags(value)
+      const stripDecoded = stripHtmlTags(decoded)
+      return new Set([
+        normalizeText(value),
+        casefold(value),
+        normalizeLoose(value),
+        casefoldLoose(value),
+        normalizeCollapseWhitespace(value),
+        casefoldCollapseWhitespace(value),
+        normalizeText(decoded),
+        casefold(decoded),
+        normalizeLoose(decoded),
+        casefoldLoose(decoded),
+        normalizeCollapseWhitespace(decoded),
+        casefoldCollapseWhitespace(decoded),
+        normalizeText(stripped),
+        casefold(stripped),
+        normalizeLoose(stripped),
+        casefoldLoose(stripped),
+        normalizeCollapseWhitespace(stripped),
+        casefoldCollapseWhitespace(stripped),
+        normalizeText(stripDecoded),
+        casefold(stripDecoded),
+        normalizeLoose(stripDecoded),
+        casefoldLoose(stripDecoded),
+        normalizeCollapseWhitespace(stripDecoded),
+        casefoldCollapseWhitespace(stripDecoded),
+      ].filter(Boolean))
+    }
+
+    const replacementVariants = Array.from(
+      jsonReplacements.reduce((set: Set<string>, replacement) => {
+        for (const variant of buildVariants(replacement.before)) {
+          set.add(variant)
+        }
+        return set
+      }, new Set<string>())
+    )
+
+    const beforeField = jsonAppliedDirection === 'srcToDst' ? 'src_text' : 'dst_text'
+    const usableRows = mappingRecords.filter(
+      (r) => r.row_status === 'OK' && r.segment_status === 'OK' && r.src_text && r.dst_text
+    )
+
+    const rowIsMatched = (before: string) => {
+      const beforeVariants = Array.from(buildVariants(before))
+      for (const bVar of beforeVariants) {
+        if (!bVar) continue
+        if (!jsonInputNorm.includes(bVar)) continue
+        for (const repVar of replacementVariants) {
+          if (!repVar) continue
+          if (bVar === repVar) return true
+          if (bVar.includes(repVar) || repVar.includes(bVar)) return true
+        }
+      }
+      return false
+    }
+
+    return usableRows.filter((r) => {
+      const before = r[beforeField as 'src_text' | 'dst_text']
+      if (!before) return false
+      if (!normalizeText(before)) return false
+      if (!jsonInputNorm.includes(normalizeText(before))) return false
+      return !rowIsMatched(before)
+    })
+  }, [jsonStats, jsonReplacements, jsonAppliedDirection, mappingRecords, jsonInput])
+
+  const filteredUnmatchedMappings = useMemo(() => {
+    const q = unmatchedQuery.trim().toLowerCase()
+    if (!q) return jsonUnmatchedMappings
+    return jsonUnmatchedMappings.filter((r) => {
+      const hay = `${r.src_text}\n${r.dst_text}`.toLowerCase()
+      return hay.includes(q)
+    })
+  }, [jsonUnmatchedMappings, unmatchedQuery])
 
   const jsonInputTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const jsonInputMoveCaretToStartAfterInput = useRef(false)
@@ -564,6 +645,7 @@ function App() {
                 <table className="table">
                   <thead>
                     <tr>
+                      <th>序号</th>
                       <th>row</th>
                       <th>block</th>
                       <th>item</th>
@@ -585,11 +667,44 @@ function App() {
                               : 'OK'
                       return (
                         <tr key={`${r.row_id}-${r.block_index}-${r.item_index}-${idx}`}>
+                          <td className="mono">{idx + 1}</td>
                           <td className="mono">{r.row_id}</td>
                           <td className="mono">{r.block_index}</td>
                           <td className="mono">{r.item_index}</td>
-                          <td className="cell">{r.src_text}</td>
-                          <td className="cell">{r.dst_text}</td>
+                          <td className="cell">
+                            <div className={`cellContent ${copiedCells.has(`${r.row_id}-${r.block_index}-${r.item_index}-src`) ? 'copied' : ''}`}>
+                              <span>{r.src_text}</span>
+                              <button
+                                className="copyIcon"
+                                onClick={async () => {
+                                  await navigator.clipboard.writeText(r.src_text)
+                                  setCopiedCells(prev => new Set([...prev, `${r.row_id}-${r.block_index}-${r.item_index}-src`]))
+                                  setCopyToast('源文本已复制')
+                                  window.setTimeout(() => setCopyToast(''), 1500)
+                                }}
+                                title="复制源文本"
+                              >
+                                📋
+                              </button>
+                            </div>
+                          </td>
+                          <td className="cell">
+                            <div className={`cellContent ${copiedCells.has(`${r.row_id}-${r.block_index}-${r.item_index}-dst`) ? 'copied' : ''}`}>
+                              <span>{r.dst_text}</span>
+                              <button
+                                className="copyIcon"
+                                onClick={async () => {
+                                  await navigator.clipboard.writeText(r.dst_text)
+                                  setCopiedCells(prev => new Set([...prev, `${r.row_id}-${r.block_index}-${r.item_index}-dst`]))
+                                  setCopyToast('目标文本已复制')
+                                  window.setTimeout(() => setCopyToast(''), 1500)
+                                }}
+                                title="复制目标文本"
+                              >
+                                📋
+                              </button>
+                            </div>
+                          </td>
                           <td className={`badge badge_${status}`}>{status}</td>
                           <td className="notes">{r.row_notes}</td>
                         </tr>
@@ -655,6 +770,7 @@ function App() {
                   setJsonError('')
                   setJsonToast('')
                   setJsonUnmatchedSamples([])
+                  setJsonReplacements([])
                   setJsonDictInfo(null)
                   setJsonAppliedDirection('')
 
@@ -701,10 +817,7 @@ function App() {
                     setJsonError(res.error)
                     setJsonOutputEdited('')
                     setJsonStats(null)
-                    setJsonPrettyInput('')
-                    setJsonPrettyOutput('')
-                    setJsonReplBefore([])
-                    setJsonReplAfter([])
+                    setJsonReplacements([])
                     return
                   }
 
@@ -718,19 +831,7 @@ function App() {
                     settingsNodes: res.stats.settingsNodes,
                   })
                   setJsonUnmatchedSamples(res.stats.unmatchedSamples)
-
-                  // Prepare highlighted compare view
-                  try {
-                    const originalObj = JSON.parse(jsonInput)
-                    setJsonPrettyInput(JSON.stringify(originalObj, null, 2))
-                  } catch {
-                    setJsonPrettyInput(jsonInput)
-                  }
-                  setJsonPrettyOutput(res.output)
-
-                  const uniq = <T,>(arr: T[]) => Array.from(new Set(arr))
-                  setJsonReplBefore(uniq(res.stats.replacements.map((x) => x.before)).filter(Boolean))
-                  setJsonReplAfter(uniq(res.stats.replacements.map((x) => x.after)).filter(Boolean))
+                  setJsonReplacements(res.stats.replacements)
 
                   if (res.stats.replaced === 0) {
                     setJsonToast(
@@ -760,8 +861,7 @@ function App() {
                   setJsonOutputEdited('')
                   setJsonError('')
                   setJsonStats(null)
-                  setJsonReplBefore([])
-                  setJsonReplAfter([])
+                  setJsonReplacements([])
                 }}
               >
                 清空
@@ -775,7 +875,6 @@ function App() {
               <JsonGutterTextarea
                 value={jsonInput}
                 onChange={setJsonInput}
-                lineCount={jsonInputLineCount}
                 placeholder='例如：{"settings":{"title":"Highlights"}}'
                 rows={Math.max(6, jsonInputLineCount)}
                 textareaClassName="jsonTextareaAutoHeight"
@@ -792,7 +891,6 @@ function App() {
               <JsonGutterTextarea
                 value={jsonOutputEdited}
                 onChange={setJsonOutputEdited}
-                lineCount={jsonOutputLineCount}
                 rows={Math.max(6, jsonOutputLineCount)}
                 textareaClassName="jsonTextareaAutoHeight"
               />
@@ -830,38 +928,85 @@ function App() {
             </div>
           </div>
 
-          {jsonPrettyInput && jsonPrettyOutput ? (
+          {jsonStats && mappingRecords.length ? (
             <div style={{ marginTop: 12 }}>
-              <div className="help" style={{ marginTop: 0 }}>
-                高亮对照（仅高亮“有映射关系并实际替换”的字段值）
+              <div className="help">
+                映射表总数：{mappingRecords.length} 条，已替换：{jsonStats.replaced} 条，未替换：{jsonUnmatchedMappings.length} 条
               </div>
-              {(() => {
-                // Grey out (dim) technical/spec keys that should be skipped
-                const dimLineMatchers: RegExp[] = [
-                  /"section_css_html"\s*:/i,
-                  /"section_css"\s*:/i,
-                  /"block_css"\s*:/i,
-                  /"block_order"\s*:/i,
-                  /"_color"\s*:/i,
-                  /"_alignment"\s*:/i,
-                ]
-                return (
-              <div className="grid2">
-                <JsonHighlightedViewer
-                  title="原始（高亮 before）"
-                  text={jsonPrettyInput}
-                  highlights={jsonReplBefore}
-                  dimLineMatchers={dimLineMatchers}
-                />
-                <JsonHighlightedViewer
-                  title="替换后（高亮 after）"
-                  text={jsonPrettyOutput}
-                  highlights={jsonReplAfter}
-                  dimLineMatchers={dimLineMatchers}
-                />
-              </div>
-                )
-              })()}
+              {jsonUnmatchedMappings.length ? (
+                <div style={{ marginTop: 10 }}>
+                  <div className="unmatchedTableTitle">
+                    未应用的映射表
+                  </div>
+                  <input
+                    className="search"
+                    placeholder="搜索（EN/DE）"
+                    value={unmatchedQuery}
+                    onChange={(e) => setUnmatchedQuery(e.target.value)}
+                    style={{ marginTop: 8, marginBottom: 8 }}
+                  />
+                  <div className="tableWrap" role="region" aria-label="未应用映射列表">
+                    <table className="table unmatchedTable">
+                      <thead>
+                        <tr>
+                          <th>序号</th>
+                          <th>row</th>
+                          <th>{srcHeaderName || '源列'}</th>
+                          <th>{dstHeaderName || '目标列'}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredUnmatchedMappings.slice(0, 100).map((r, idx) => (
+                          <tr key={`${r.row_id}-${r.block_index}-${r.item_index}-${idx}`}>
+                            <td className="mono">{idx + 1}</td>
+                            <td className="mono">{r.row_id}</td>
+                            <td className="cell">
+                              <div className={`cellContent ${copiedCells.has(`${r.row_id}-${r.block_index}-${r.item_index}-src`) ? 'copied' : ''}`}>
+                                <span>{r.src_text}</span>
+                                <button
+                                  className="copyIcon"
+                                  onClick={async () => {
+                                    await navigator.clipboard.writeText(r.src_text)
+                                    setCopiedCells(prev => new Set([...prev, `${r.row_id}-${r.block_index}-${r.item_index}-src`]))
+                                    setCopyToast('源文本已复制')
+                                    window.setTimeout(() => setCopyToast(''), 1500)
+                                  }}
+                                  title="复制源文本"
+                                >
+                                  📋
+                                </button>
+                              </div>
+                            </td>
+                            <td className="cell">
+                              <div className={`cellContent ${copiedCells.has(`${r.row_id}-${r.block_index}-${r.item_index}-dst`) ? 'copied' : ''}`}>
+                                <span>{r.dst_text}</span>
+                                <button
+                                  className="copyIcon"
+                                  onClick={async () => {
+                                    await navigator.clipboard.writeText(r.dst_text)
+                                    setCopiedCells(prev => new Set([...prev, `${r.row_id}-${r.block_index}-${r.item_index}-dst`]))
+                                    setCopyToast('目标文本已复制')
+                                    window.setTimeout(() => setCopyToast(''), 1500)
+                                  }}
+                                  title="复制目标文本"
+                                >
+                                  📋
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {filteredUnmatchedMappings.length > 100 ? (
+                      <div className="help">仅展示前 100 条未替换映射。</div>
+                    ) : null}
+                    {filteredUnmatchedMappings.length === 0 && unmatchedQuery.trim() ? (
+                      <div className="help">未找到匹配的映射。</div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -877,27 +1022,8 @@ function App() {
                   JSON.stringify(
                     {
                       settings: {
-                        title: 'Highlights',
-                      },
-                    },
-                    null,
-                    2
-                  )
-                )
-              }
-            >
-              Highlights
-            </button>
-            <button
-              className="btn"
-              type="button"
-              onClick={() =>
-                setJsonInput(
-                  JSON.stringify(
-                    {
-                      settings: {
                         htmlText: 'Hello<br>World',
-                        htmlSpan: '<span class=\"x\">Highlights</span><br>More',
+                        htmlSpan: '<span class="x">Highlights</span><br>More',
                       },
                     },
                     null,
@@ -945,93 +1071,3 @@ function App() {
 }
 
 export default App
-
-function JsonHighlightedViewer(props: {
-  title: string
-  text: string
-  highlights: string[]
-  dimLineMatchers: RegExp[]
-}) {
-  const lines = useMemo(() => props.text.split('\n'), [props.text])
-  const lineCount = lines.length
-
-  const needles = useMemo(() => {
-    // Avoid huge candidates; keep BOTH long and short replacements so short keys (e.g. Lieferumfang) still highlight.
-    const uniq = Array.from(new Set(props.highlights.filter((s) => s && s.length <= 200)))
-    uniq.sort((a, b) => b.length - a.length)
-    const longFirst = uniq.slice(0, 60)
-    const shortFirst = uniq.slice().reverse().slice(0, 60)
-    return Array.from(new Set([...longFirst, ...shortFirst])).slice(0, 120)
-  }, [props.highlights])
-
-  return (
-    <div className="field">
-      <label>{props.title}</label>
-      <div className="jsonPane">
-        <div className="gutter" aria-hidden="true">
-          {Array.from({ length: lineCount }, (_, i) => (
-            <div key={i} className="gutterLine">
-              {i + 1}
-            </div>
-          ))}
-        </div>
-        <pre className="codeBox">
-          {lines.map((ln, idx) => (
-            <div
-              key={idx}
-              className={`codeLine ${props.dimLineMatchers.some((re) => re.test(ln)) ? 'dimLine' : ''}`}
-            >
-              {renderHighlighted(ln, needles)}
-            </div>
-          ))}
-        </pre>
-      </div>
-    </div>
-  )
-}
-
-function renderHighlighted(line: string, needles: string[]) {
-  if (!needles.length) return line
-  let parts: Array<string | { m: string }> = [line]
-  for (const n of needles) {
-    const next: Array<string | { m: string }> = []
-    for (const p of parts) {
-      if (typeof p !== 'string') {
-        next.push(p)
-        continue
-      }
-      const chunks = splitKeep(p, n)
-      for (const c of chunks) {
-        if (c === n) next.push({ m: c })
-        else next.push(c)
-      }
-    }
-    parts = next
-  }
-  return parts.map((p, i) =>
-    typeof p === 'string' ? (
-      <span key={i}>{p}</span>
-    ) : (
-      <mark key={i} className="hl">
-        {p.m}
-      </mark>
-    )
-  )
-}
-
-function splitKeep(hay: string, needle: string): string[] {
-  if (!needle) return [hay]
-  const out: string[] = []
-  let i = 0
-  while (i < hay.length) {
-    const j = hay.indexOf(needle, i)
-    if (j === -1) {
-      out.push(hay.slice(i))
-      break
-    }
-    if (j > i) out.push(hay.slice(i, j))
-    out.push(needle)
-    i = j + needle.length
-  }
-  return out.filter((x) => x.length > 0)
-}
