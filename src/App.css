@@ -392,6 +392,12 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 8px;
+  padding: 4px;
+  border-radius: 6px;
+}
+
+.cellContent.copied {
+  background: rgba(255, 235, 59, 0.2);
 }
 
 .cellContent span {

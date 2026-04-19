@@ -1,6 +1,6 @@
 export type RowStatus = 'OK' | 'NEED_REVIEW' | 'ERROR'
 export type SegmentStatus = 'OK' | 'UNMATCHED' | 'NEED_REVIEW' | 'STRIKED'
-export type SplitMethod = 'none' | 'marker' | 'inline_asterisk' | 'sentence_fallback'
+export type SplitMethod = 'none' | 'marker' | 'inline_asterisk' | 'sentence_fallback' | 'pipe_list'
 
 export type MappingRecord = {
   row_id: number
@@ -142,6 +142,34 @@ function splitItemsByMarkers(block: string, markerPrefixes: string[]): { items: 
   }
 
   return { items, used }
+}
+
+/**
+ * When EN/NL 同一行用「 | 」并列多条卖点时，按竖线拆成多条，与对侧同序对齐。
+ * 仅在两侧对应条目拆出的段数相同且均 ≥2 时生效，避免误拆正文里偶然出现的单个 |。
+ */
+function expandPipeAlignedItems(srcItems: string[], dstItems: string[]): { src: string[]; dst: string[]; expanded: boolean } {
+  if (srcItems.length !== dstItems.length) {
+    return { src: srcItems, dst: dstItems, expanded: false }
+  }
+  const srcOut: string[] = []
+  const dstOut: string[] = []
+  let expanded = false
+  for (let i = 0; i < srcItems.length; i++) {
+    const s = trimSegment(srcItems[i] ?? '')
+    const d = trimSegment(dstItems[i] ?? '')
+    const segS = s.split(/\s*\|\s*/).map(trimSegment).filter(Boolean)
+    const segD = d.split(/\s*\|\s*/).map(trimSegment).filter(Boolean)
+    if (segS.length >= 2 && segS.length === segD.length) {
+      srcOut.push(...segS)
+      dstOut.push(...segD)
+      expanded = true
+    } else {
+      srcOut.push(s)
+      dstOut.push(d)
+    }
+  }
+  return { src: srcOut, dst: dstOut, expanded }
 }
 
 function splitInlineAsterisk(text: string): { items: string[]; used: boolean } {
@@ -395,6 +423,16 @@ export function buildMappingsFromRow(
         if (improvedSrc) srcItems = srcInline.items
         if (improvedDst) dstItems = dstInline.items
         split_method = 'inline_asterisk'
+      }
+    }
+
+    // 2b) 同一 item 内「A | B | C」与对侧同结构竖线列表 → 拆成多条一一对齐
+    if (srcItems.length === dstItems.length) {
+      const pipe = expandPipeAlignedItems(srcItems, dstItems)
+      if (pipe.expanded) {
+        srcItems = pipe.src
+        dstItems = pipe.dst
+        split_method = 'pipe_list'
       }
     }
 

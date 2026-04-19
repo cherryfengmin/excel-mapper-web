@@ -20,7 +20,7 @@ import {
   casefoldLoose,
   casefoldCollapseWhitespace,
 } from './lib/dictionary'
-import { replaceJsonSettings } from './lib/jsonSettingsReplace'
+import { collectSettingsReplaceablePlainText, replaceJsonSettings } from './lib/jsonSettingsReplace'
 import { decodeHtmlEntities, stripHtmlTags } from './lib/html'
 
 /** JSON 编辑区：textarea（无行号） */
@@ -67,6 +67,7 @@ function App() {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'OK' | 'NEED_REVIEW' | 'ERROR' | 'UNMATCHED'>('ALL')
   const [unmatchedQuery, setUnmatchedQuery] = useState('')
+  const [copiedCells, setCopiedCells] = useState<Set<string>>(new Set())
 
   const [loadError, setLoadError] = useState<string>('')
   const [mappingRecords, setMappingRecords] = useState<MappingRecord[]>([])
@@ -303,7 +304,9 @@ function App() {
   const jsonUnmatchedMappings = useMemo(() => {
     if (!jsonStats || !jsonAppliedDirection) return []
 
-    const jsonInputNorm = normalizeText(jsonInput)
+    const collected = collectSettingsReplaceablePlainText(jsonInput)
+    const settingsHaystackNorm =
+      collected.ok === true ? normalizeText(collected.haystack) : ''
 
     const buildVariants = (value: string) => {
       const decoded = decodeHtmlEntities(value)
@@ -355,7 +358,7 @@ function App() {
       const beforeVariants = Array.from(buildVariants(before))
       for (const bVar of beforeVariants) {
         if (!bVar) continue
-        if (!jsonInputNorm.includes(bVar)) continue
+        if (!settingsHaystackNorm.includes(bVar)) continue
         for (const repVar of replacementVariants) {
           if (!repVar) continue
           if (bVar === repVar) return true
@@ -369,7 +372,7 @@ function App() {
       const before = r[beforeField as 'src_text' | 'dst_text']
       if (!before) return false
       if (!normalizeText(before)) return false
-      if (!jsonInputNorm.includes(normalizeText(before))) return false
+      if (!settingsHaystackNorm.includes(normalizeText(before))) return false
       return !rowIsMatched(before)
     })
   }, [jsonStats, jsonReplBefore, jsonAppliedDirection, mappingRecords, jsonInput])
@@ -495,9 +498,6 @@ function App() {
             </div>
             <div className="field">
               <label className="fieldLabelTitle">
-                <span className="labelRequired" aria-hidden="true">
-                  *
-                </span>
                 <strong>条目标记（每行一个；用于切分 item）</strong>
               </label>
               <textarea
@@ -614,8 +614,9 @@ function App() {
             使用说明：处理非ok状态的记录，处理方法是去对应到excel表里找到对比到两格内容，找到有问题的那条内容，前/后点一下换行按钮，需要同时修改原列跟目标列，保证两个格子内容通过换行或者空行划分到段落的顺序跟数量一致。当处理完后则可进行下一步。
             </li>
             <li>
-            对于修改了 Excel 后仍存在非 OK 的记录，只能在第三步「应用映射」得到替换后的 JSON 基础上人工排查替换。第三步应用映射后会输出未应用的映射表，可按表上记录逐条处理。
+            对于修改了 Excel 后仍存在非 OK 的记录，只能在第三步「应用映射」得到替换后的 JSON 基础上人工排查替换。第三步应用映射后会输出未应用的映射表，可按表上记录逐条人工替换。
           </li>
+          <li>把新的翻译好的json更新到shiopiy后，可在浏览器转换翻译成英文版本方便核对；刷新映射按钮如按了无反应，请刷新页面重来</li>
           </ul>
           <div className="row mappingResultToolbar">
             <input
@@ -645,7 +646,7 @@ function App() {
                 window.setTimeout(() => setCopyToast(''), 1500)
               }}
             >
-              复制为 “EN：DE”
+              复制映射表
             </button>
             <button
               className="btn"
@@ -669,7 +670,7 @@ function App() {
                 window.setTimeout(() => setFieldsJsonToast(''), 1500)
               }}
             >
-              输出字段json
+              输出映射json
             </button>
             <button
               className="btn"
@@ -696,7 +697,7 @@ function App() {
                 }
               }}
             >
-              刷新映射
+              刷新映射表
             </button>
           </div>
           {copyToast ? <div className="toast">{copyToast}</div> : null}
@@ -737,12 +738,16 @@ function App() {
                           <td className="mono">{r.block_index}</td>
                           <td className="mono">{r.item_index}</td>
                           <td className="cell">
-                            <div className="cellContent">
+                            <div
+                              className={`cellContent ${copiedCells.has(`${r.row_id}-${r.block_index}-${r.item_index}-src`) ? 'copied' : ''}`}
+                            >
                               <span>{r.src_text}</span>
                               <button
                                 className="copyIcon"
                                 onClick={async () => {
+                                  const key = `${r.row_id}-${r.block_index}-${r.item_index}-src`
                                   await navigator.clipboard.writeText(r.src_text)
+                                  setCopiedCells((prev) => new Set([...prev, key]))
                                   setCopyToast('源文本已复制')
                                   window.setTimeout(() => setCopyToast(''), 1500)
                                 }}
@@ -753,12 +758,16 @@ function App() {
                             </div>
                           </td>
                           <td className="cell">
-                            <div className="cellContent">
+                            <div
+                              className={`cellContent ${copiedCells.has(`${r.row_id}-${r.block_index}-${r.item_index}-dst`) ? 'copied' : ''}`}
+                            >
                               <span>{r.dst_text}</span>
                               <button
                                 className="copyIcon"
                                 onClick={async () => {
+                                  const key = `${r.row_id}-${r.block_index}-${r.item_index}-dst`
                                   await navigator.clipboard.writeText(r.dst_text)
+                                  setCopiedCells((prev) => new Set([...prev, key]))
                                   setCopyToast('目标文本已复制')
                                   window.setTimeout(() => setCopyToast(''), 1500)
                                 }}
@@ -948,7 +957,9 @@ function App() {
                   jsonInputMoveCaretToStartAfterInput.current = true
                 }}
               />
-              <p className="help">只会替换 JSON 顶层字段 <code>settings</code> 内部的字符串值（递归）。</p>
+              <p className="help">
+                只会替换解析后<strong>任意层级</strong>中、对象里名为 <code>settings</code> 的子树内的字符串值（递归）。同级字段如 <code>type</code>、<code>name</code> 等下的字符串<strong>不会</strong>被替换；在整份 JSON 里能搜到某段英文，不代表它落在可替换的 <code>settings</code> 字符串里。
+              </p>
               {jsonError ? <p className="help">解析失败：{jsonError}</p> : null}
             </div>
             <div className="field">
@@ -1003,6 +1014,9 @@ function App() {
                   <div className="unmatchedTableTitle">
                     未应用的映射表
                   </div>
+                  <p className="help" style={{ marginTop: 6, marginBottom: 0 }}>
+                    下列记录在<strong>解析后的 JSON 里、且仅在与「应用映射」相同的 <code>settings</code> 可替换字符串范围内</strong>仍能匹配到「源/目标」文案，但<strong>未出现在本次替换统计的 before 列表中</strong>（或无法与替换结果对齐）。常见原因：技术字段整段跳过、替换方向与 JSON 语言不一致、或 Excel 与 JSON 规范化后仍有差异。
+                  </p>
                   <input
                     className="search"
                     placeholder="搜索（EN/DE）"
@@ -1026,12 +1040,16 @@ function App() {
                             <td className="mono">{idx + 1}</td>
                             <td className="mono">{r.row_id}</td>
                             <td className="cell">
-                              <div className="cellContent">
+                              <div
+                                className={`cellContent ${copiedCells.has(`unm-${r.row_id}-${r.block_index}-${r.item_index}-src`) ? 'copied' : ''}`}
+                              >
                                 <span>{r.src_text}</span>
                                 <button
                                   className="copyIcon"
                                   onClick={async () => {
+                                    const key = `unm-${r.row_id}-${r.block_index}-${r.item_index}-src`
                                     await navigator.clipboard.writeText(r.src_text)
+                                    setCopiedCells((prev) => new Set([...prev, key]))
                                     setCopyToast('源文本已复制')
                                     window.setTimeout(() => setCopyToast(''), 1500)
                                   }}
@@ -1042,12 +1060,16 @@ function App() {
                               </div>
                             </td>
                             <td className="cell">
-                              <div className="cellContent">
+                              <div
+                                className={`cellContent ${copiedCells.has(`unm-${r.row_id}-${r.block_index}-${r.item_index}-dst`) ? 'copied' : ''}`}
+                              >
                                 <span>{r.dst_text}</span>
                                 <button
                                   className="copyIcon"
                                   onClick={async () => {
+                                    const key = `unm-${r.row_id}-${r.block_index}-${r.item_index}-dst`
                                     await navigator.clipboard.writeText(r.dst_text)
+                                    setCopiedCells((prev) => new Set([...prev, key]))
                                     setCopyToast('目标文本已复制')
                                     window.setTimeout(() => setCopyToast(''), 1500)
                                   }}

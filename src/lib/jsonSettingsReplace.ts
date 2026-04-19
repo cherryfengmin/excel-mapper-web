@@ -89,6 +89,78 @@ export function replaceJsonSettings(
   return { ok: true as const, output: JSON.stringify(root, null, 2), stats }
 }
 
+export type CollectSettingsStringsResult =
+  | { ok: true; haystack: string; settingsNodes: number }
+  | { ok: false; error: string }
+
+/**
+ * 收集「应用映射」时会尝试替换的字符串：与 replaceJsonSettings 相同范围——
+ * 任意 `settings` 子树内、且未被 shouldSkipByKey 跳过的键下的所有字符串叶子；无 settings 时可选整段根对象。
+ */
+export function collectSettingsReplaceablePlainText(
+  jsonText: string,
+  options?: Partial<ReplaceOptions>
+): CollectSettingsStringsResult {
+  const opts: ReplaceOptions = { ...DEFAULT_OPTS, ...(options ?? {}) }
+  let root: any
+  try {
+    root = JSON.parse(jsonText)
+  } catch (e) {
+    return { ok: false as const, error: e instanceof Error ? e.message : String(e) }
+  }
+
+  if (!root || typeof root !== 'object') {
+    return { ok: true as const, haystack: '', settingsNodes: 0 }
+  }
+
+  const parts: string[] = []
+  const counters = { settingsNodes: 0 }
+
+  function collectWalkStrings(node: any): void {
+    if (node === null || node === undefined) return
+    if (typeof node === 'string') {
+      parts.push(node)
+      return
+    }
+    if (Array.isArray(node)) {
+      for (const x of node) collectWalkStrings(x)
+      return
+    }
+    if (typeof node === 'object') {
+      for (const [k, v] of Object.entries(node)) {
+        if (shouldSkipByKey(k, v, opts)) continue
+        collectWalkStrings(v)
+      }
+    }
+  }
+
+  function collectFromSettingsNodes(node: any): void {
+    if (node === null || node === undefined) return
+    if (Array.isArray(node)) {
+      for (const x of node) collectFromSettingsNodes(x)
+      return
+    }
+    if (typeof node !== 'object') return
+    for (const [k, v] of Object.entries(node)) {
+      if (k === 'settings') {
+        counters.settingsNodes += 1
+        collectWalkStrings(v)
+      } else {
+        collectFromSettingsNodes(v)
+      }
+    }
+  }
+
+  const hadRootSettings = hasOwn(root, 'settings')
+  collectFromSettingsNodes(root)
+
+  if (!hadRootSettings && counters.settingsNodes === 0 && opts.allowRootAsSettingsWhenMissing) {
+    collectWalkStrings(root)
+  }
+
+  return { ok: true as const, haystack: parts.join('\n'), settingsNodes: counters.settingsNodes }
+}
+
 function walk(node: any, dict: BuiltDictionary, stats: ReplaceStats, opts: ReplaceOptions): any {
   if (node === null || node === undefined) return node
   if (typeof node === 'string') return replaceStringSmart(node, dict, stats, opts)
