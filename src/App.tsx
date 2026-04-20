@@ -958,7 +958,7 @@ function App() {
                 }}
               />
               <p className="help">
-                只会替换解析后<strong>任意层级</strong>中、对象里名为 <code>settings</code> 的子树内的字符串值（递归）。同级字段如 <code>type</code>、<code>name</code> 等下的字符串<strong>不会</strong>被替换；在整份 JSON 里能搜到某段英文，不代表它落在可替换的 <code>settings</code> 字符串里。
+                只会替换解析后<strong>任意层级</strong>中、对象里名为 <code>settings</code> 的子树内的字符串值（递归）。提高替换率,原始json把<code><nobr></nobr></code>提前批量移除后再复制进来,得到替换后的json后可重新根据页面情况添加<code><nobr></nobr></code>
               </p>
               {jsonError ? <p className="help">解析失败：{jsonError}</p> : null}
             </div>
