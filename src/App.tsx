@@ -45,6 +45,29 @@ function JsonGutterTextarea(props: {
 }
 
 function App() {
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      const saved = localStorage.getItem('theme')
+      if (saved === 'light' || saved === 'dark') return saved
+    } catch {
+      // ignore
+    }
+    const prefersDark =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches
+    return prefersDark ? 'dark' : 'light'
+  })
+
+  useLayoutEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    try {
+      localStorage.setItem('theme', theme)
+    } catch {
+      // ignore
+    }
+  }, [theme])
+
   const [file, setFile] = useState<File | null>(null)
   const [workbook, setWorkbook] = useState<ExcelWorkbook | null>(null)
   const [sheetName, setSheetName] = useState<string>('')
@@ -361,6 +384,15 @@ function App() {
               上传 xlsx，选择两列做映射，生成 <code>"EN"："DE"</code>数据，替换json翻译。
             </p>
           </div>
+          <button
+            type="button"
+            className="btn btnSmall"
+            onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+            aria-label={theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'}
+            title={theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'}
+          >
+            {theme === 'dark' ? '亮色' : '暗色'}
+          </button>
         </div>
       </header>
 
