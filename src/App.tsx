@@ -11,17 +11,8 @@ import {
   type SheetMatrix,
 } from './lib/excel'
 import { buildMappingsFromRow, buildQuotePairs, type MappingRecord } from './lib/mapping'
-import {
-  buildDictionaryFromMappings,
-  normalizeText,
-  normalizeLoose,
-  normalizeCollapseWhitespace,
-  casefold,
-  casefoldLoose,
-  casefoldCollapseWhitespace,
-} from './lib/dictionary'
-import { collectSettingsReplaceablePlainText, replaceJsonSettings } from './lib/jsonSettingsReplace'
-import { decodeHtmlEntities, stripHtmlTags } from './lib/html'
+import { buildDictionaryFromMappings } from './lib/dictionary'
+import { addNobrToJsonSettingsLastTwoWords, replaceJsonSettings } from './lib/jsonSettingsReplace'
 
 /** JSON 编辑区：textarea（无行号） */
 function JsonGutterTextarea(props: {
@@ -88,12 +79,24 @@ function App() {
     unmatched: number
     review: number
     settingsNodes: number
+    usedSourceKeys: string[]
+    usedSourceKeysExact: string[]
+    usedSourceKeysFuzzy: string[]
+    usedSourceKeysSubstring: string[]
   } | null>(null)
   const [jsonUnmatchedSamples, setJsonUnmatchedSamples] = useState<string[]>([])
   const [jsonDirection, setJsonDirection] = useState<'auto' | 'srcToDst' | 'dstToSrc'>('auto')
   const [jsonDictInfo, setJsonDictInfo] = useState<{ size: number; collisions: number } | null>(null)
   const [jsonAppliedDirection, setJsonAppliedDirection] = useState<'srcToDst' | 'dstToSrc' | ''>('')
-  const [jsonReplBefore, setJsonReplBefore] = useState<string[]>([])
+
+  // JSON: add <nobr> for last two words
+  const [nobrJsonInput, setNobrJsonInput] = useState<string>('')
+  const [nobrJsonOutput, setNobrJsonOutput] = useState<string>('')
+  const [nobrJsonError, setNobrJsonError] = useState<string>('')
+  const [nobrToast, setNobrToast] = useState<string>('')
+  const [nobrStats, setNobrStats] = useState<{ changed: number; unchanged: number; skipped: number; settingsNodes: number } | null>(
+    null
+  )
 
   const headerRow = useMemo(() => (matrix && matrix.length ? matrix[0] ?? [] : []), [matrix])
   const srcHeaderName = useMemo(() => {
@@ -302,80 +305,30 @@ function App() {
   )
 
   const jsonUnmatchedMappings = useMemo(() => {
+    // A) key-based: mapping keys (unique) minus actually-used keys in this run
     if (!jsonStats || !jsonAppliedDirection) return []
-
-    const collected = collectSettingsReplaceablePlainText(jsonInput)
-    const settingsHaystackNorm =
-      collected.ok === true ? normalizeText(collected.haystack) : ''
-
-    const buildVariants = (value: string) => {
-      const decoded = decodeHtmlEntities(value)
-      const stripped = stripHtmlTags(value)
-      const stripDecoded = stripHtmlTags(decoded)
-      return new Set([
-        normalizeText(value),
-        casefold(value),
-        normalizeLoose(value),
-        casefoldLoose(value),
-        normalizeCollapseWhitespace(value),
-        casefoldCollapseWhitespace(value),
-        normalizeText(decoded),
-        casefold(decoded),
-        normalizeLoose(decoded),
-        casefoldLoose(decoded),
-        normalizeCollapseWhitespace(decoded),
-        casefoldCollapseWhitespace(decoded),
-        normalizeText(stripped),
-        casefold(stripped),
-        normalizeLoose(stripped),
-        casefoldLoose(stripped),
-        normalizeCollapseWhitespace(stripped),
-        casefoldCollapseWhitespace(stripped),
-        normalizeText(stripDecoded),
-        casefold(stripDecoded),
-        normalizeLoose(stripDecoded),
-        casefoldLoose(stripDecoded),
-        normalizeCollapseWhitespace(stripDecoded),
-        casefoldCollapseWhitespace(stripDecoded),
-      ].filter(Boolean))
-    }
-
-    const replacementVariants = Array.from(
-      jsonReplBefore.reduce<Set<string>>((set, rawBefore) => {
-        for (const variant of buildVariants(rawBefore)) {
-          set.add(variant)
-        }
-        return set
-      }, new Set<string>())
-    )
-
     const beforeField = jsonAppliedDirection === 'srcToDst' ? 'src_text' : 'dst_text'
     const usableRows = mappingRecords.filter(
       (r) => r.row_status === 'OK' && r.segment_status === 'OK' && r.src_text && r.dst_text
     )
 
-    const rowIsMatched = (before: string) => {
-      const beforeVariants = Array.from(buildVariants(before))
-      for (const bVar of beforeVariants) {
-        if (!bVar) continue
-        if (!settingsHaystackNorm.includes(bVar)) continue
-        for (const repVar of replacementVariants) {
-          if (!repVar) continue
-          if (bVar === repVar) return true
-          if (bVar.includes(repVar) || repVar.includes(bVar)) return true
-        }
-      }
-      return false
+    const allKeys = new Set<string>()
+    for (const r of usableRows) {
+      const k = r[beforeField]
+      if (k) allKeys.add(k)
+    }
+
+    const usedSet = new Set(jsonStats.usedSourceKeys ?? [])
+    const unusedKeySet = new Set<string>()
+    for (const k of allKeys) {
+      if (!usedSet.has(k)) unusedKeySet.add(k)
     }
 
     return usableRows.filter((r) => {
-      const before = r[beforeField as 'src_text' | 'dst_text']
-      if (!before) return false
-      if (!normalizeText(before)) return false
-      if (!settingsHaystackNorm.includes(normalizeText(before))) return false
-      return !rowIsMatched(before)
+      const k = r[beforeField]
+      return !!k && unusedKeySet.has(k)
     })
-  }, [jsonStats, jsonReplBefore, jsonAppliedDirection, mappingRecords, jsonInput])
+  }, [jsonStats, jsonAppliedDirection, mappingRecords])
 
   const filteredUnmatchedMappings = useMemo(() => {
     const q = unmatchedQuery.trim().toLowerCase()
@@ -842,7 +795,6 @@ function App() {
                   setJsonError('')
                   setJsonToast('')
                   setJsonUnmatchedSamples([])
-                  setJsonReplBefore([])
                   setJsonDictInfo(null)
                   setJsonAppliedDirection('')
 
@@ -889,7 +841,6 @@ function App() {
                     setJsonError(res.error)
                     setJsonOutputEdited('')
                     setJsonStats(null)
-                    setJsonReplBefore([])
                     return
                   }
 
@@ -901,11 +852,12 @@ function App() {
                     unmatched: res.stats.unmatched,
                     review: res.stats.review,
                     settingsNodes: res.stats.settingsNodes,
+                    usedSourceKeys: res.stats.usedSourceKeys ?? [],
+                    usedSourceKeysExact: res.stats.usedSourceKeysExact ?? [],
+                    usedSourceKeysFuzzy: res.stats.usedSourceKeysFuzzy ?? [],
+                    usedSourceKeysSubstring: res.stats.usedSourceKeysSubstring ?? [],
                   })
                   setJsonUnmatchedSamples(res.stats.unmatchedSamples)
-
-                  const uniq = <T,>(arr: T[]) => Array.from(new Set(arr))
-                  setJsonReplBefore(uniq(res.stats.replacements.map((x) => x.before)).filter(Boolean))
 
                   if (res.stats.replaced === 0) {
                     setJsonToast(
@@ -935,7 +887,6 @@ function App() {
                   setJsonOutputEdited('')
                   setJsonError('')
                   setJsonStats(null)
-                  setJsonReplBefore([])
                 }}
               >
                 清空
@@ -958,7 +909,7 @@ function App() {
                 }}
               />
               <p className="help">
-                只会替换解析后<strong>任意层级</strong>中、对象里名为 <code>settings</code> 的子树内的字符串值（递归）。提高替换率,原始json把<code><nobr></nobr></code>提前批量移除后再复制进来,得到替换后的json后可重新根据页面情况添加<code><nobr></nobr></code>
+                只会替换解析后<strong>任意层级</strong>中、对象里名为 <code>settings</code> 的子树内的字符串值（递归）。提高替换率,原始json把<code>{'<nobr></nobr>'}</code>提前批量移除后再复制进来,得到替换后的json后可重新根据页面情况添加<code>{'<nobr></nobr>'}</code>
               </p>
               {jsonError ? <p className="help">解析失败：{jsonError}</p> : null}
             </div>
@@ -1150,6 +1101,100 @@ function App() {
             </div>
           ) : null}
         </section>
+
+        <section className="card">
+          <div className="cardHeader">
+            <h2>3.5) JSON 批量添加 &lt;nobr&gt;（末尾两词）</h2>
+            <div className="row">
+              <button
+                className="btn btnPrimary"
+                disabled={!nobrJsonInput.trim()}
+                onClick={() => {
+                  setNobrJsonError('')
+                  setNobrToast('')
+                  const res = addNobrToJsonSettingsLastTwoWords(nobrJsonInput)
+                  if (!res.ok) {
+                    setNobrJsonError(res.error)
+                    setNobrJsonOutput('')
+                    setNobrStats(null)
+                    return
+                  }
+                  setNobrJsonOutput(res.output)
+                  setNobrStats(res.stats)
+                }}
+              >
+                添加 &lt;nobr&gt;
+              </button>
+              <button
+                className="btn"
+                disabled={!nobrJsonOutput.trim()}
+                onClick={async () => {
+                  await navigator.clipboard.writeText(nobrJsonOutput)
+                  setNobrToast('复制成功')
+                  window.setTimeout(() => setNobrToast(''), 1500)
+                }}
+              >
+                复制结果 JSON
+              </button>
+              <button
+                className="btn"
+                onClick={() => {
+                  setNobrJsonInput('')
+                  setNobrJsonOutput('')
+                  setNobrJsonError('')
+                  setNobrToast('')
+                  setNobrStats(null)
+                }}
+              >
+                清空
+              </button>
+            </div>
+          </div>
+
+          {nobrToast ? <div className="toast">{nobrToast}</div> : null}
+
+          <div className="grid2">
+            <div className="field">
+              <label>输入 JSON（原始）</label>
+              <JsonGutterTextarea
+                value={nobrJsonInput}
+                onChange={setNobrJsonInput}
+                placeholder='例如：{"settings":{"title":"The Washable Filter: For Extended, Repeated Use"}}'
+                rows={10}
+              />
+              <p className="help">
+                会在 <code>settings</code> 子树内的文本字符串末尾，把<strong>最后两个单词</strong>包上 <code>{'<nobr>…</nobr>'}</code>。已含
+                <code>{'<nobr>'}</code>、含 HTML 标签、或技术字段（URL/颜色/css token 等）会跳过。
+              </p>
+              {nobrJsonError ? <p className="help">解析失败：{nobrJsonError}</p> : null}
+            </div>
+            <div className="field">
+              <label>输出 JSON（处理后）</label>
+              <JsonGutterTextarea value={nobrJsonOutput} onChange={setNobrJsonOutput} rows={10} />
+              {nobrStats ? (
+                <p className="help">
+                  统计：changed={nobrStats.changed} unchanged={nobrStats.unchanged} skipped={nobrStats.skipped}{' '}
+                  settingsNodes={nobrStats.settingsNodes}
+                </p>
+              ) : (
+                <p className="help">点击 <code>添加 &lt;nobr&gt;</code> 生成处理后的 JSON。</p>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <footer className="footer">
+          <div className="footerInner">
+            <span>项目代码来源：</span>
+            <a
+              href="https://github.com/cherryfengmin/excel-mapper-web"
+              target="_blank"
+              rel="noreferrer"
+            >
+              https://github.com/cherryfengmin/excel-mapper-web
+            </a>
+          </div>
+        </footer>
       </main>
     </div>
   )

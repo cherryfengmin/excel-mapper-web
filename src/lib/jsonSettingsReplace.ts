@@ -10,10 +10,26 @@ export type ReplaceStats = {
   unmatchedSamples: string[]
   settingsNodes: number
   replacements: Array<{ before: string; after: string }>
+  /** mapping source keys (A) that were actually used in this run */
+  usedSourceKeys: string[]
+  usedSourceKeysExact: string[]
+  usedSourceKeysFuzzy: string[]
+  usedSourceKeysSubstring: string[]
 }
 
 export type ReplaceJsonSettingsResult =
   | { ok: true; output: string; stats: ReplaceStats }
+  | { ok: false; error: string }
+
+export type NobrStats = {
+  changed: number
+  unchanged: number
+  skipped: number
+  settingsNodes: number
+}
+
+export type AddNobrLastTwoWordsResult =
+  | { ok: true; output: string; stats: NobrStats }
   | { ok: false; error: string }
 
 export type ReplaceOptions = {
@@ -36,6 +52,7 @@ const DEFAULT_OPTS: ReplaceOptions = {
     'section_css',
     'section_css_html',
     'block_css',
+    'custom_html_css',
     'block_order',
     'addition_content_color',
     'addition_content_color_mb',
@@ -62,6 +79,13 @@ export function replaceJsonSettings(
     return { ok: false as const, error: e instanceof Error ? e.message : String(e) }
   }
 
+  const used = {
+    all: new Set<string>(),
+    exact: new Set<string>(),
+    fuzzy: new Set<string>(),
+    substring: new Set<string>(),
+  }
+
   const stats: ReplaceStats = {
     replaced: 0,
     unchanged: 0,
@@ -71,6 +95,10 @@ export function replaceJsonSettings(
     unmatchedSamples: [],
     settingsNodes: 0,
     replacements: [],
+    usedSourceKeys: [],
+    usedSourceKeysExact: [],
+    usedSourceKeysFuzzy: [],
+    usedSourceKeysSubstring: [],
   }
 
   if (!root || typeof root !== 'object') {
@@ -79,11 +107,51 @@ export function replaceJsonSettings(
 
   // Replace any nested `settings` nodes in the whole JSON tree.
   const hadRootSettings = hasOwn(root, 'settings')
-  root = replaceAllSettingsNodes(root, dict, stats, opts)
+  root = replaceAllSettingsNodes(root, dict, stats, opts, used)
 
   // If no `settings` key exists anywhere, optionally treat root as settings for quick paste of fragments.
   if (!hadRootSettings && stats.settingsNodes === 0 && opts.allowRootAsSettingsWhenMissing) {
-    root = walk(root, dict, stats, opts)
+    root = walk(root, dict, stats, opts, used)
+  }
+
+  stats.usedSourceKeys = Array.from(used.all)
+  stats.usedSourceKeysExact = Array.from(used.exact)
+  stats.usedSourceKeysFuzzy = Array.from(used.fuzzy)
+  stats.usedSourceKeysSubstring = Array.from(used.substring)
+
+  return { ok: true as const, output: JSON.stringify(root, null, 2), stats }
+}
+
+/**
+ * Add `<nobr></nobr>` around the last TWO words of each replaceable string under any `settings` subtree.
+ * - Skips keys by `shouldSkipByKey` (same scope as replaceJsonSettings)
+ * - Skips "technical" values by `shouldSkipTechnical`
+ * - Skips strings that already contain `<nobr`
+ * - Skips strings that contain any HTML tags (to avoid breaking markup)
+ */
+export function addNobrToJsonSettingsLastTwoWords(
+  jsonText: string,
+  options?: Partial<ReplaceOptions>
+): AddNobrLastTwoWordsResult {
+  const opts: ReplaceOptions = { ...DEFAULT_OPTS, ...(options ?? {}) }
+  let root: any
+  try {
+    root = JSON.parse(jsonText)
+  } catch (e) {
+    return { ok: false as const, error: e instanceof Error ? e.message : String(e) }
+  }
+
+  const stats: NobrStats = { changed: 0, unchanged: 0, skipped: 0, settingsNodes: 0 }
+
+  if (!root || typeof root !== 'object') {
+    return { ok: true as const, output: JSON.stringify(root, null, 2), stats }
+  }
+
+  const hadRootSettings = hasOwn(root, 'settings')
+  root = addNobrAllSettingsNodes(root, stats, opts)
+
+  if (!hadRootSettings && stats.settingsNodes === 0 && opts.allowRootAsSettingsWhenMissing) {
+    root = addNobrWalk(root, stats, opts)
   }
 
   return { ok: true as const, output: JSON.stringify(root, null, 2), stats }
@@ -161,18 +229,18 @@ export function collectSettingsReplaceablePlainText(
   return { ok: true as const, haystack: parts.join('\n'), settingsNodes: counters.settingsNodes }
 }
 
-function walk(node: any, dict: BuiltDictionary, stats: ReplaceStats, opts: ReplaceOptions): any {
+function addNobrWalk(node: any, stats: NobrStats, opts: ReplaceOptions): any {
   if (node === null || node === undefined) return node
-  if (typeof node === 'string') return replaceStringSmart(node, dict, stats, opts)
-  if (Array.isArray(node)) return node.map((x) => walk(x, dict, stats, opts))
+  if (typeof node === 'string') return addNobrToLastTwoWords(node, stats, opts)
+  if (Array.isArray(node)) return node.map((x) => addNobrWalk(x, stats, opts))
   if (typeof node === 'object') {
-    const out: any = Array.isArray(node) ? [] : {}
+    const out: any = {}
     for (const [k, v] of Object.entries(node)) {
       if (shouldSkipByKey(k, v, opts)) {
         stats.skipped += countStrings(v)
         out[k] = v
       } else {
-        out[k] = walk(v, dict, stats, opts)
+        out[k] = addNobrWalk(v, stats, opts)
       }
     }
     return out
@@ -180,18 +248,115 @@ function walk(node: any, dict: BuiltDictionary, stats: ReplaceStats, opts: Repla
   return node
 }
 
-function replaceAllSettingsNodes(node: any, dict: BuiltDictionary, stats: ReplaceStats, opts: ReplaceOptions): any {
+function addNobrAllSettingsNodes(node: any, stats: NobrStats, opts: ReplaceOptions): any {
   if (node === null || node === undefined) return node
-  if (Array.isArray(node)) return node.map((x) => replaceAllSettingsNodes(x, dict, stats, opts))
+  if (Array.isArray(node)) return node.map((x) => addNobrAllSettingsNodes(x, stats, opts))
+  if (typeof node !== 'object') return node
+  const out: any = {}
+  for (const [k, v] of Object.entries(node)) {
+    if (k === 'settings') {
+      stats.settingsNodes += 1
+      out[k] = addNobrWalk(v, stats, opts)
+    } else {
+      out[k] = addNobrAllSettingsNodes(v, stats, opts)
+    }
+  }
+  return out
+}
+
+function addNobrToLastTwoWords(input: string, stats: NobrStats, opts: ReplaceOptions): string {
+  const raw = input
+  const t = normalizeText(raw)
+  if (!t) {
+    stats.unchanged += 1
+    return raw
+  }
+
+  // If already contains <nobr>, do nothing (no further checks needed)
+  if (/<\s*nobr\b/i.test(raw)) {
+    stats.unchanged += 1
+    return raw
+  }
+
+  if (shouldSkipTechnical(raw, opts)) {
+    stats.skipped += 1
+    return raw
+  }
+
+  // avoid breaking existing HTML; this module is for plain text fields
+  if (containsHtmlTag(raw)) {
+    stats.skipped += 1
+    return raw
+  }
+
+  const changed = wrapLastTwoWordsWithNobr(raw)
+  if (changed === raw) {
+    stats.unchanged += 1
+    return raw
+  }
+  stats.changed += 1
+  return changed
+}
+
+function wrapLastTwoWordsWithNobr(input: string): string {
+  // Only apply when there are more than 3 words in the text.
+  // We consider "words" as letter/number sequences (allowing internal hyphens).
+  const words = input.match(/[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu) ?? []
+  if (words.length <= 3) return input
+
+  const m = input.match(/^(.*?)(\b[\p{L}\p{N}][\p{L}\p{N}-]*\s+[\p{L}\p{N}][\p{L}\p{N}-]*)(\s*[)\]}>"'“”’]*\s*[.!?,;:]*)\s*$/u)
+  if (!m) return input
+  const head = m[1] ?? ''
+  const tailWords = m[2] ?? ''
+  const trailer = m[3] ?? ''
+  // Require some non-space head, otherwise a two-word string is still ok; keep it anyway.
+  if (!tailWords.includes(' ')) return input
+  return `${head}<nobr>${tailWords}</nobr>${trailer}`.replace(/\s+$/g, '')
+}
+
+function walk(
+  node: any,
+  dict: BuiltDictionary,
+  stats: ReplaceStats,
+  opts: ReplaceOptions,
+  used: { all: Set<string>; exact: Set<string>; fuzzy: Set<string>; substring: Set<string> }
+): any {
+  if (node === null || node === undefined) return node
+  if (typeof node === 'string') return replaceStringSmart(node, dict, stats, opts, used)
+  if (Array.isArray(node)) return node.map((x) => walk(x, dict, stats, opts, used))
+  if (typeof node === 'object') {
+    const out: any = Array.isArray(node) ? [] : {}
+    for (const [k, v] of Object.entries(node)) {
+      if (shouldSkipByKey(k, v, opts)) {
+        stats.skipped += countStrings(v)
+        out[k] = v
+      } else {
+        out[k] = walk(v, dict, stats, opts, used)
+      }
+    }
+    return out
+  }
+  return node
+}
+
+function replaceAllSettingsNodes(
+  node: any,
+  dict: BuiltDictionary,
+  stats: ReplaceStats,
+  opts: ReplaceOptions,
+  used: { all: Set<string>; exact: Set<string>; fuzzy: Set<string>; substring: Set<string> }
+): any {
+  if (node === null || node === undefined) return node
+  if (Array.isArray(node)) return node.map((x) => replaceAllSettingsNodes(x, dict, stats, opts, used))
   if (typeof node !== 'object') return node
 
   const out: any = {}
   for (const [k, v] of Object.entries(node)) {
     if (k === 'settings') {
       stats.settingsNodes += 1
-      out[k] = walk(v, dict, stats, opts)
+      out[k] = walk(v, dict, stats, opts, used)
     } else {
-      out[k] = replaceAllSettingsNodes(v, dict, stats, opts)
+      out[k] = replaceAllSettingsNodes(v, dict, stats, opts, used)
     }
   }
   return out
@@ -229,7 +394,13 @@ function countStrings(node: any): number {
   return 0
 }
 
-function replaceStringSmart(input: string, dict: BuiltDictionary, stats: ReplaceStats, opts: ReplaceOptions): string {
+function replaceStringSmart(
+  input: string,
+  dict: BuiltDictionary,
+  stats: ReplaceStats,
+  opts: ReplaceOptions,
+  used: { all: Set<string>; exact: Set<string>; fuzzy: Set<string>; substring: Set<string> }
+): string {
   const raw = input
   const t = normalizeText(raw)
 
@@ -248,6 +419,12 @@ function replaceStringSmart(input: string, dict: BuiltDictionary, stats: Replace
   if (spec) {
     const labelMatch = lookupBest(dict, spec.label)
     if (labelMatch.found) {
+      const src = labelMatch.dictKey ? dict.sourceByKey.get(labelMatch.dictKey) : undefined
+      if (src) {
+        used.all.add(src)
+        if (labelMatch.kind === 'exact') used.exact.add(src)
+        else used.fuzzy.add(src)
+      }
       stats.replaced += 1
       if (labelMatch.kind !== 'exact') stats.review += 1
       const next = `${labelMatch.value}${spec.sep}${spec.value}`
@@ -259,7 +436,7 @@ function replaceStringSmart(input: string, dict: BuiltDictionary, stats: Replace
 
   // HTML tag protection
   if (containsHtmlTag(raw)) {
-    const replaced = replaceHtmlPreserveTags(raw, dict, stats, opts)
+    const replaced = replaceHtmlPreserveTags(raw, dict, stats, opts, used)
     if (replaced !== null) {
       recordReplacement(stats, raw, replaced)
       return replaced
@@ -268,6 +445,12 @@ function replaceStringSmart(input: string, dict: BuiltDictionary, stats: Replace
     const stripped = stripHtmlTags(raw)
     const mStrip = lookupBest(dict, stripped)
     if (mStrip.found) {
+      const src = mStrip.dictKey ? dict.sourceByKey.get(mStrip.dictKey) : undefined
+      if (src) {
+        used.all.add(src)
+        if (mStrip.kind === 'exact') used.exact.add(src)
+        else used.fuzzy.add(src)
+      }
       stats.replaced += 1
       if (mStrip.kind !== 'exact') stats.review += 1
       recordReplacement(stats, raw, mStrip.value)
@@ -279,6 +462,12 @@ function replaceStringSmart(input: string, dict: BuiltDictionary, stats: Replace
   // Direct lookup variants
   const m = lookupBest(dict, raw)
   if (m.found) {
+    const src = m.dictKey ? dict.sourceByKey.get(m.dictKey) : undefined
+    if (src) {
+      used.all.add(src)
+      if (m.kind === 'exact') used.exact.add(src)
+      else used.fuzzy.add(src)
+    }
     stats.replaced += 1
     if (m.kind !== 'exact') stats.review += 1
     recordReplacement(stats, raw, m.value)
@@ -289,6 +478,10 @@ function replaceStringSmart(input: string, dict: BuiltDictionary, stats: Replace
   if (opts.enableSubstringMatch) {
     const sub = replaceByUniqueSubstring(raw, dict)
     if (sub.replaced) {
+      if (sub.sourceKey) {
+        used.all.add(sub.sourceKey)
+        used.substring.add(sub.sourceKey)
+      }
       stats.replaced += 1
       stats.review += 1
       recordReplacement(stats, raw, sub.value)
@@ -317,7 +510,8 @@ function replaceHtmlPreserveTags(
   input: string,
   dict: BuiltDictionary,
   stats: ReplaceStats,
-  opts: ReplaceOptions
+  opts: ReplaceOptions,
+  used: { all: Set<string>; exact: Set<string>; fuzzy: Set<string>; substring: Set<string> }
 ): string | null {
   const tokens = tokenizeHtml(input)
   let changed = false
@@ -327,6 +521,12 @@ function replaceHtmlPreserveTags(
     const text = tok.value
     const m = lookupBest(dict, text)
     if (m.found) {
+      const src = m.dictKey ? dict.sourceByKey.get(m.dictKey) : undefined
+      if (src) {
+        used.all.add(src)
+        if (m.kind === 'exact') used.exact.add(src)
+        else used.fuzzy.add(src)
+      }
       changed = true
       stats.replaced += 1
       if (m.kind !== 'exact') stats.review += 1
@@ -337,6 +537,12 @@ function replaceHtmlPreserveTags(
     const decoded = decodeHtmlEntities(text)
     const m2 = lookupBest(dict, decoded)
     if (m2.found) {
+      const src = m2.dictKey ? dict.sourceByKey.get(m2.dictKey) : undefined
+      if (src) {
+        used.all.add(src)
+        if (m2.kind === 'exact') used.exact.add(src)
+        else used.fuzzy.add(src)
+      }
       changed = true
       stats.replaced += 1
       stats.review += 1
@@ -347,6 +553,10 @@ function replaceHtmlPreserveTags(
     if (opts.enableSubstringMatch) {
       const sub = replaceByUniqueSubstring(text, dict)
       if (sub.replaced) {
+        if (sub.sourceKey) {
+          used.all.add(sub.sourceKey)
+          used.substring.add(sub.sourceKey)
+        }
         changed = true
         stats.replaced += 1
         stats.review += 1
@@ -357,8 +567,39 @@ function replaceHtmlPreserveTags(
     return tok
   })
 
-  if (!changed) return null
-  return rebuildHtml(out)
+  if (changed) return rebuildHtml(out)
+
+  // If text is split by tags (e.g. <div>foo<br>bar</div>), try matching the full concatenated text once,
+  // then preserve all tags and replace only the text content.
+  const fullText = tokens
+    .filter((t) => t.type === 'text')
+    .map((t) => t.value)
+    .join('')
+
+  const mFull = lookupBest(dict, fullText)
+  if (mFull.found) {
+    const src = mFull.dictKey ? dict.sourceByKey.get(mFull.dictKey) : undefined
+    if (src) {
+      used.all.add(src)
+      if (mFull.kind === 'exact') used.exact.add(src)
+      else used.fuzzy.add(src)
+    }
+    stats.replaced += 1
+    if (mFull.kind !== 'exact') stats.review += 1
+
+    let wrote = false
+    const replacedTokens = tokens.map((t) => {
+      if (t.type === 'tag') return t
+      if (!wrote) {
+        wrote = true
+        return { type: 'text' as const, value: mFull.value }
+      }
+      return { type: 'text' as const, value: '' }
+    })
+    return rebuildHtml(replacedTokens)
+  }
+
+  return null
 }
 
 function splitSpecLabelValue(input: string): { label: string; sep: string; value: string } | null {
@@ -398,14 +639,18 @@ function shouldSkipTechnical(value: string, opts: ReplaceOptions): boolean {
   if (
     /^[a-zA-Z_][\w-]*$/.test(v) &&
     v.length <= opts.skipCssIdentifierMaxLen &&
-    /[-_\d]/.test(v)
+    /[-_\d]/.test(v) &&
+    v === v.toLowerCase()
   )
     return true
 
   return false
 }
 
-function replaceByUniqueSubstring(input: string, dict: BuiltDictionary): { replaced: boolean; value: string; matchedNeedle?: string } {
+function replaceByUniqueSubstring(
+  input: string,
+  dict: BuiltDictionary
+): { replaced: boolean; value: string; matchedNeedle?: string; sourceKey?: string } {
   // Conservative substring replacement:
   // - Only when input has no tags/entities (so we can safely mutate raw string)
   // - Only when there is exactly one candidate needle with word-ish boundary
@@ -442,7 +687,8 @@ function replaceByUniqueSubstring(input: string, dict: BuiltDictionary): { repla
   if (!re.test(input)) return { replaced: false, value: input }
 
   const next = input.replace(re, `$1${matchValue}$3`)
-  return { replaced: next !== input, value: next, matchedNeedle: matchNeedle }
+  const sourceKey = matchKey ? dict.sourceByKey.get(matchKey) : undefined
+  return { replaced: next !== input, value: next, matchedNeedle: matchNeedle, sourceKey }
 }
 
 function escapeRegExp(s: string): string {

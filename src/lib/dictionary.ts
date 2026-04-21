@@ -30,6 +30,8 @@ export type DictionaryBuildOptions = {
 
 export type BuiltDictionary = {
   map: Map<string, string>
+  /** internalKey -> original source text (direction-dependent) */
+  sourceByKey: Map<string, string>
   collisions: Array<{ key: string; existing: string; incoming: string }>
   size: number
 }
@@ -71,8 +73,10 @@ export function casefoldCollapseWhitespace(s: string): string {
 
 function addKey(
   map: Map<string, string>,
+  sourceByKey: Map<string, string>,
   collisions: Array<{ key: string; existing: string; incoming: string }>,
   key: string,
+  source: string,
   target: string,
   allowDuplicatesSameTarget: boolean
 ) {
@@ -80,6 +84,7 @@ function addKey(
   const prev = map.get(key)
   if (prev === undefined) {
     map.set(key, target)
+    sourceByKey.set(key, source)
     return
   }
   if (allowDuplicatesSameTarget && prev === target) return
@@ -92,6 +97,7 @@ export function buildDictionaryFromMappings(
   options: DictionaryBuildOptions
 ): BuiltDictionary {
   const map = new Map<string, string>()
+  const sourceByKey = new Map<string, string>()
   const collisions: Array<{ key: string; existing: string; incoming: string }> = []
 
   const usable = options.includeOnlyOkRows
@@ -123,39 +129,45 @@ export function buildDictionaryFromMappings(
     const stripDecodedNorm = normalizeText(stripDecoded)
     const stripDecodedCf = casefold(stripDecoded)
 
-    addKey(map, collisions, `raw::${raw}`, target, options.allowDuplicatesSameTarget)
-    addKey(map, collisions, `norm::${normalized}`, target, options.allowDuplicatesSameTarget)
-    addKey(map, collisions, `cf::${cf}`, target, options.allowDuplicatesSameTarget)
-    addKey(map, collisions, `loose::${loose}`, target, options.allowDuplicatesSameTarget)
-    addKey(map, collisions, `loose_cf::${looseCf}`, target, options.allowDuplicatesSameTarget)
-    addKey(map, collisions, `ws::${ws}`, target, options.allowDuplicatesSameTarget)
-    addKey(map, collisions, `ws_cf::${wsCf}`, target, options.allowDuplicatesSameTarget)
-    addKey(map, collisions, `d_norm::${decodedNorm}`, target, options.allowDuplicatesSameTarget)
-    addKey(map, collisions, `d_cf::${decodedCf}`, target, options.allowDuplicatesSameTarget)
-    addKey(map, collisions, `s_norm::${stripNorm}`, target, options.allowDuplicatesSameTarget)
-    addKey(map, collisions, `s_cf::${stripCf}`, target, options.allowDuplicatesSameTarget)
-    addKey(map, collisions, `sd_norm::${stripDecodedNorm}`, target, options.allowDuplicatesSameTarget)
-    addKey(map, collisions, `sd_cf::${stripDecodedCf}`, target, options.allowDuplicatesSameTarget)
+    addKey(map, sourceByKey, collisions, `raw::${raw}`, source, target, options.allowDuplicatesSameTarget)
+    addKey(map, sourceByKey, collisions, `norm::${normalized}`, source, target, options.allowDuplicatesSameTarget)
+    addKey(map, sourceByKey, collisions, `cf::${cf}`, source, target, options.allowDuplicatesSameTarget)
+    addKey(map, sourceByKey, collisions, `loose::${loose}`, source, target, options.allowDuplicatesSameTarget)
+    addKey(map, sourceByKey, collisions, `loose_cf::${looseCf}`, source, target, options.allowDuplicatesSameTarget)
+    addKey(map, sourceByKey, collisions, `ws::${ws}`, source, target, options.allowDuplicatesSameTarget)
+    addKey(map, sourceByKey, collisions, `ws_cf::${wsCf}`, source, target, options.allowDuplicatesSameTarget)
+    addKey(map, sourceByKey, collisions, `d_norm::${decodedNorm}`, source, target, options.allowDuplicatesSameTarget)
+    addKey(map, sourceByKey, collisions, `d_cf::${decodedCf}`, source, target, options.allowDuplicatesSameTarget)
+    addKey(map, sourceByKey, collisions, `s_norm::${stripNorm}`, source, target, options.allowDuplicatesSameTarget)
+    addKey(map, sourceByKey, collisions, `s_cf::${stripCf}`, source, target, options.allowDuplicatesSameTarget)
+    addKey(map, sourceByKey, collisions, `sd_norm::${stripDecodedNorm}`, source, target, options.allowDuplicatesSameTarget)
+    addKey(map, sourceByKey, collisions, `sd_cf::${stripDecodedCf}`, source, target, options.allowDuplicatesSameTarget)
 
     // Also store loose variants for decoded/stripped (helps HTML label tokens like "Filterinformationen:")
     addKey(
       map,
+      sourceByKey,
       collisions,
       `d_loose::${normalizeLoose(decoded)}`,
+      source,
       target,
       options.allowDuplicatesSameTarget
     )
     addKey(
       map,
+      sourceByKey,
       collisions,
       `s_loose::${normalizeLoose(stripped)}`,
+      source,
       target,
       options.allowDuplicatesSameTarget
     )
     addKey(
       map,
+      sourceByKey,
       collisions,
       `sd_loose::${normalizeLoose(stripDecoded)}`,
+      source,
       target,
       options.allowDuplicatesSameTarget
     )
@@ -163,8 +175,8 @@ export function buildDictionaryFromMappings(
     if (options.includeMultilineLines && normalized.includes('\n')) {
       const lines = normalized.split('\n').map((x) => x.trim()).filter(Boolean)
       for (const ln of lines) {
-        addKey(map, collisions, `line_norm::${ln}`, target, options.allowDuplicatesSameTarget)
-        addKey(map, collisions, `line_cf::${ln.toLowerCase()}`, target, options.allowDuplicatesSameTarget)
+        addKey(map, sourceByKey, collisions, `line_norm::${ln}`, source, target, options.allowDuplicatesSameTarget)
+        addKey(map, sourceByKey, collisions, `line_cf::${ln.toLowerCase()}`, source, target, options.allowDuplicatesSameTarget)
       }
     }
 
@@ -172,12 +184,18 @@ export function buildDictionaryFromMappings(
     void rowId
   }
 
-  return { map, collisions, size: map.size }
+  return { map, sourceByKey, collisions, size: map.size }
 }
 
 export type MatchKind = 'exact' | 'decoded' | 'stripped' | 'casefold' | 'line' | 'none'
 
-export function lookupBest(dict: BuiltDictionary, input: string): { found: boolean; value: string; kind: MatchKind } {
+export function lookupBest(dict: BuiltDictionary, input: string): {
+  found: boolean
+  value: string
+  kind: MatchKind
+  /** matched internal dictionary key (e.g. "raw::...") */
+  dictKey?: string
+} {
   const raw = input
   const norm = normalizeText(input)
   const cf = casefold(input)
@@ -186,47 +204,63 @@ export function lookupBest(dict: BuiltDictionary, input: string): { found: boole
   const ws = normalizeCollapseWhitespace(input)
   const wsCf = casefoldCollapseWhitespace(input)
 
-  const v0 = dict.map.get(`raw::${raw}`)
-  if (v0 !== undefined) return { found: true, value: v0, kind: 'exact' }
+  const k0 = `raw::${raw}`
+  const v0 = dict.map.get(k0)
+  if (v0 !== undefined) return { found: true, value: v0, kind: 'exact', dictKey: k0 }
 
-  const v1 = dict.map.get(`norm::${norm}`)
-  if (v1 !== undefined) return { found: true, value: v1, kind: 'exact' }
+  const k1 = `norm::${norm}`
+  const v1 = dict.map.get(k1)
+  if (v1 !== undefined) return { found: true, value: v1, kind: 'exact', dictKey: k1 }
 
-  const vl = dict.map.get(`loose::${loose}`)
-  if (vl !== undefined) return { found: true, value: vl, kind: 'exact' }
+  const kl = `loose::${loose}`
+  const vl = dict.map.get(kl)
+  if (vl !== undefined) return { found: true, value: vl, kind: 'exact', dictKey: kl }
 
-  const vws = dict.map.get(`ws::${ws}`)
-  if (vws !== undefined) return { found: true, value: vws, kind: 'exact' }
+  const kws = `ws::${ws}`
+  const vws = dict.map.get(kws)
+  if (vws !== undefined) return { found: true, value: vws, kind: 'exact', dictKey: kws }
 
   const decoded = decodeHtmlEntities(input)
   const decodedNorm = normalizeText(decoded)
-  const vd = dict.map.get(`d_norm::${decodedNorm}`)
-  if (vd !== undefined) return { found: true, value: vd, kind: 'decoded' }
+  const kd = `d_norm::${decodedNorm}`
+  const vd = dict.map.get(kd)
+  if (vd !== undefined) return { found: true, value: vd, kind: 'decoded', dictKey: kd }
 
-  const vdLoose = dict.map.get(`d_loose::${normalizeLoose(decoded)}`)
-  if (vdLoose !== undefined) return { found: true, value: vdLoose, kind: 'decoded' }
+  const kd2 = `d_loose::${normalizeLoose(decoded)}`
+  const vdLoose = dict.map.get(kd2)
+  if (vdLoose !== undefined) return { found: true, value: vdLoose, kind: 'decoded', dictKey: kd2 }
 
   const stripped = stripHtmlTags(input)
   const stripNorm = normalizeText(stripped)
-  const vs = dict.map.get(`s_norm::${stripNorm}`)
-  if (vs !== undefined) return { found: true, value: vs, kind: 'stripped' }
+  const ks = `s_norm::${stripNorm}`
+  const vs = dict.map.get(ks)
+  if (vs !== undefined) return { found: true, value: vs, kind: 'stripped', dictKey: ks }
 
-  const vsLoose = dict.map.get(`s_loose::${normalizeLoose(stripped)}`)
-  if (vsLoose !== undefined) return { found: true, value: vsLoose, kind: 'stripped' }
+  const ks2 = `s_loose::${normalizeLoose(stripped)}`
+  const vsLoose = dict.map.get(ks2)
+  if (vsLoose !== undefined) return { found: true, value: vsLoose, kind: 'stripped', dictKey: ks2 }
 
-  const vcf =
-    dict.map.get(`cf::${cf}`) ??
-    dict.map.get(`d_cf::${casefold(decoded)}`) ??
-    dict.map.get(`s_cf::${casefold(stripped)}`) ??
-    dict.map.get(`loose_cf::${looseCf}`) ??
-    dict.map.get(`ws_cf::${wsCf}`)
-  if (vcf !== undefined) return { found: true, value: vcf, kind: 'casefold' }
+  const vcfKeyCandidates = [
+    `cf::${cf}`,
+    `d_cf::${casefold(decoded)}`,
+    `s_cf::${casefold(stripped)}`,
+    `loose_cf::${looseCf}`,
+    `ws_cf::${wsCf}`,
+  ] as const
+  for (const k of vcfKeyCandidates) {
+    const v = dict.map.get(k)
+    if (v !== undefined) return { found: true, value: v, kind: 'casefold', dictKey: k }
+  }
 
   if (norm.includes('\n')) {
     const lines = norm.split('\n').map((x) => x.trim()).filter(Boolean)
     for (const ln of lines) {
-      const vl = dict.map.get(`line_norm::${ln}`) ?? dict.map.get(`line_cf::${ln.toLowerCase()}`)
-      if (vl !== undefined) return { found: true, value: vl, kind: 'line' }
+      const kln = `line_norm::${ln}`
+      const kcf = `line_cf::${ln.toLowerCase()}`
+      const vl = dict.map.get(kln)
+      if (vl !== undefined) return { found: true, value: vl, kind: 'line', dictKey: kln }
+      const vcf = dict.map.get(kcf)
+      if (vcf !== undefined) return { found: true, value: vcf, kind: 'line', dictKey: kcf }
     }
   }
 
