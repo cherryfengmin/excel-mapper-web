@@ -89,6 +89,9 @@ function addKey(
   }
   if (allowDuplicatesSameTarget && prev === target) return
   collisions.push({ key, existing: prev, incoming: target })
+  // Prefer later rows (last-write-wins) to match export behavior in UI.
+  map.set(key, target)
+  sourceByKey.set(key, source)
 }
 
 export function buildDictionaryFromMappings(

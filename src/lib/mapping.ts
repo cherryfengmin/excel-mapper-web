@@ -114,6 +114,12 @@ function splitItemsByMarkers(block: string, markerPrefixes: string[]): { items: 
   if (nonEmpty.length >= 2) {
     const anyMarker = nonEmpty.some((ln) => isMarkerLine(ln, markerPrefixes))
     if (!anyMarker) {
+      // If the text contains pipe separators, it's likely a single headline like
+      // "A | B | C" that was visually wrapped in Excel; do NOT treat it as a list.
+      const joined = nonEmpty.join(' ')
+      if (/[|｜]/.test(joined)) {
+        return { items: [trimSegment(joined)].filter(Boolean), used: false }
+      }
       return { items: nonEmpty.map((x) => trimSegment(x)).filter(Boolean), used: true }
     }
   }
@@ -427,7 +433,8 @@ export function buildMappingsFromRow(
     }
 
     // 2b) 同一 item 内「A | B | C」与对侧同结构竖线列表 → 拆成多条一一对齐
-    if (srcItems.length === dstItems.length) {
+    // 默认不启用：只有当用户在“条目标记”里显式添加了 "|" 才认为需要按竖线拆分。
+    if (srcItems.length === dstItems.length && cfg.markerPrefixes.includes('|')) {
       const pipe = expandPipeAlignedItems(srcItems, dstItems)
       if (pipe.expanded) {
         srcItems = pipe.src

@@ -1,6 +1,17 @@
 import { decodeHtmlEntities, rebuildHtml, tokenizeHtml, stripHtmlTags } from './html'
 import { lookupBest, type BuiltDictionary, normalizeText } from './dictionary'
 
+export type PathSegment = string | number
+
+export type UnmatchedItem = {
+  /** JSON path segments from the root (e.g. ["sections","x","settings","title"]) */
+  path: PathSegment[]
+  /** Human-readable path text */
+  pathText: string
+  /** Original string value at this path */
+  value: string
+}
+
 export type ReplaceStats = {
   replaced: number
   unchanged: number
@@ -8,6 +19,8 @@ export type ReplaceStats = {
   unmatched: number
   review: number
   unmatchedSamples: string[]
+  /** Unmatched string leaves (only collected under `settings` subtree) */
+  unmatchedItems: UnmatchedItem[]
   settingsNodes: number
   replacements: Array<{ before: string; after: string }>
   /** mapping source keys (A) that were actually used in this run */
@@ -57,6 +70,14 @@ const DEFAULT_OPTS: ReplaceOptions = {
     'addition_content_color',
     'addition_content_color_mb',
     'addition_content_alignment',
+    // Shopify/theme technical selectors & layout enums (should not be translated / manually edited here)
+    'divided_into_count',
+    'divided_m_into_count',
+    'media_type',
+    'media_layout',
+    'add_to_cart_button_size',
+    'product_selector',
+    'current_product',
   ],
   skipKeysRegex: [
     /_color(_|$)/i,
@@ -93,6 +114,7 @@ export function replaceJsonSettings(
     unmatched: 0,
     review: 0,
     unmatchedSamples: [],
+    unmatchedItems: [],
     settingsNodes: 0,
     replacements: [],
     usedSourceKeys: [],
@@ -107,11 +129,12 @@ export function replaceJsonSettings(
 
   // Replace any nested `settings` nodes in the whole JSON tree.
   const hadRootSettings = hasOwn(root, 'settings')
-  root = replaceAllSettingsNodes(root, dict, stats, opts, used)
+  root = replaceAllSettingsNodes(root, dict, stats, opts, used, [])
 
   // If no `settings` key exists anywhere, optionally treat root as settings for quick paste of fragments.
   if (!hadRootSettings && stats.settingsNodes === 0 && opts.allowRootAsSettingsWhenMissing) {
-    root = walk(root, dict, stats, opts, used)
+    // NOTE: user wants unmatched edits only for real `settings` subtrees; don't collect unmatched in root-fallback.
+    root = walk(root, dict, stats, opts, used, [], false)
   }
 
   stats.usedSourceKeys = Array.from(used.all)
@@ -159,6 +182,10 @@ export function addNobrToJsonSettingsLastTwoWords(
 
 export type CollectSettingsStringsResult =
   | { ok: true; haystack: string; settingsNodes: number }
+  | { ok: false; error: string }
+
+export type CollectSettingsLeavesResult =
+  | { ok: true; leaves: UnmatchedItem[]; settingsNodes: number }
   | { ok: false; error: string }
 
 /**
@@ -229,6 +256,69 @@ export function collectSettingsReplaceablePlainText(
   return { ok: true as const, haystack: parts.join('\n'), settingsNodes: counters.settingsNodes }
 }
 
+/** Collect replaceable string leaves under any `settings` subtree, with JSON paths. */
+export function collectSettingsReplaceableLeaves(
+  jsonText: string,
+  options?: Partial<ReplaceOptions>
+): CollectSettingsLeavesResult {
+  const opts: ReplaceOptions = { ...DEFAULT_OPTS, ...(options ?? {}) }
+  let root: any
+  try {
+    root = JSON.parse(jsonText)
+  } catch (e) {
+    return { ok: false as const, error: e instanceof Error ? e.message : String(e) }
+  }
+
+  if (!root || typeof root !== 'object') {
+    return { ok: true as const, leaves: [], settingsNodes: 0 }
+  }
+
+  const leaves: UnmatchedItem[] = []
+  const counters = { settingsNodes: 0 }
+
+  function collectWalk(node: any, path: PathSegment[]) {
+    if (node === null || node === undefined) return
+    if (typeof node === 'string') {
+      // follow replaceStringSmart's early behavior: only consider non-empty + non-technical strings
+      const t = normalizeText(node)
+      if (!t) return
+      if (shouldSkipTechnical(node, opts)) return
+      leaves.push({ path, pathText: formatPath(path), value: node })
+      return
+    }
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) collectWalk(node[i], [...path, i])
+      return
+    }
+    if (typeof node === 'object') {
+      for (const [k, v] of Object.entries(node)) {
+        if (shouldSkipByKey(k, v, opts)) continue
+        collectWalk(v, [...path, k])
+      }
+    }
+  }
+
+  function collectFromSettingsNodes(node: any, path: PathSegment[]) {
+    if (node === null || node === undefined) return
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) collectFromSettingsNodes(node[i], [...path, i])
+      return
+    }
+    if (typeof node !== 'object') return
+    for (const [k, v] of Object.entries(node)) {
+      if (k === 'settings') {
+        counters.settingsNodes += 1
+        collectWalk(v, [...path, k])
+      } else {
+        collectFromSettingsNodes(v, [...path, k])
+      }
+    }
+  }
+
+  collectFromSettingsNodes(root, [])
+  return { ok: true as const, leaves, settingsNodes: counters.settingsNodes }
+}
+
 function addNobrWalk(node: any, stats: NobrStats, opts: ReplaceOptions): any {
   if (node === null || node === undefined) return node
   if (typeof node === 'string') return addNobrToLastTwoWords(node, stats, opts)
@@ -283,13 +373,18 @@ function addNobrToLastTwoWords(input: string, stats: NobrStats, opts: ReplaceOpt
     return raw
   }
 
-  // avoid breaking existing HTML; this module is for plain text fields
+  // If contains HTML tags, preserve tags and only edit text tokens.
   if (containsHtmlTag(raw)) {
-    stats.skipped += 1
-    return raw
+    const replaced = addNobrPreserveHtmlTags(raw)
+    if (replaced === raw) {
+      stats.unchanged += 1
+      return raw
+    }
+    stats.changed += 1
+    return replaced
   }
 
-  const changed = wrapLastTwoWordsWithNobr(raw)
+  const changed = wrapTailWordsWithNobr(raw)
   if (changed === raw) {
     stats.unchanged += 1
     return raw
@@ -298,20 +393,39 @@ function addNobrToLastTwoWords(input: string, stats: NobrStats, opts: ReplaceOpt
   return changed
 }
 
-function wrapLastTwoWordsWithNobr(input: string): string {
-  // Only apply when there are more than 3 words in the text.
+function wrapTailWordsWithNobr(input: string): string {
   // We consider "words" as letter/number sequences (allowing internal hyphens).
   const words = input.match(/[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu) ?? []
+  // Only apply when there are more than 3 words in the text.
   if (words.length <= 3) return input
 
-  const m = input.match(/^(.*?)(\b[\p{L}\p{N}][\p{L}\p{N}-]*\s+[\p{L}\p{N}][\p{L}\p{N}-]*)(\s*[)\]}>"'“”’]*\s*[.!?,;:]*)\s*$/u)
+  // Preserve leading/trailing whitespace (including newlines) so HTML text tokens keep formatting.
+  const lead = input.match(/^\s+/u)?.[0] ?? ''
+  const trail = input.match(/\s+$/u)?.[0] ?? ''
+  const core = input.slice(lead.length, input.length - trail.length)
+
+  // Match across newlines: use [\s\S] instead of dot (.) so wrapped Excel lines still work.
+  const m = core.match(
+    /^([\s\S]*?)(\b[\p{L}\p{N}][\p{L}\p{N}-]*\s+[\p{L}\p{N}][\p{L}\p{N}-]*)(\s*[)\]}>"'“”’]*\s*[.!?,;:]*)$/u
+  )
   if (!m) return input
   const head = m[1] ?? ''
   const tailWords = m[2] ?? ''
   const trailer = m[3] ?? ''
-  // Require some non-space head, otherwise a two-word string is still ok; keep it anyway.
   if (!tailWords.includes(' ')) return input
-  return `${head}<nobr>${tailWords}</nobr>${trailer}`.replace(/\s+$/g, '')
+  return `${lead}${head}<nobr>${tailWords}</nobr>${trailer}${trail}`
+}
+
+function addNobrPreserveHtmlTags(input: string): string {
+  const tokens = tokenizeHtml(input)
+  let changed = false
+  const out = tokens.map((tok) => {
+    if (tok.type === 'tag') return tok
+    const next = wrapTailWordsWithNobr(tok.value)
+    if (next !== tok.value) changed = true
+    return { type: 'text' as const, value: next }
+  })
+  return changed ? rebuildHtml(out) : input
 }
 
 function walk(
@@ -319,11 +433,13 @@ function walk(
   dict: BuiltDictionary,
   stats: ReplaceStats,
   opts: ReplaceOptions,
-  used: { all: Set<string>; exact: Set<string>; fuzzy: Set<string>; substring: Set<string> }
+  used: { all: Set<string>; exact: Set<string>; fuzzy: Set<string>; substring: Set<string> },
+  path: PathSegment[],
+  collectUnmatched: boolean
 ): any {
   if (node === null || node === undefined) return node
-  if (typeof node === 'string') return replaceStringSmart(node, dict, stats, opts, used)
-  if (Array.isArray(node)) return node.map((x) => walk(x, dict, stats, opts, used))
+  if (typeof node === 'string') return replaceStringSmart(node, dict, stats, opts, used, path, collectUnmatched)
+  if (Array.isArray(node)) return node.map((x, i) => walk(x, dict, stats, opts, used, [...path, i], collectUnmatched))
   if (typeof node === 'object') {
     const out: any = Array.isArray(node) ? [] : {}
     for (const [k, v] of Object.entries(node)) {
@@ -331,7 +447,7 @@ function walk(
         stats.skipped += countStrings(v)
         out[k] = v
       } else {
-        out[k] = walk(v, dict, stats, opts, used)
+        out[k] = walk(v, dict, stats, opts, used, [...path, k], collectUnmatched)
       }
     }
     return out
@@ -344,19 +460,21 @@ function replaceAllSettingsNodes(
   dict: BuiltDictionary,
   stats: ReplaceStats,
   opts: ReplaceOptions,
-  used: { all: Set<string>; exact: Set<string>; fuzzy: Set<string>; substring: Set<string> }
+  used: { all: Set<string>; exact: Set<string>; fuzzy: Set<string>; substring: Set<string> },
+  path: PathSegment[]
 ): any {
   if (node === null || node === undefined) return node
-  if (Array.isArray(node)) return node.map((x) => replaceAllSettingsNodes(x, dict, stats, opts, used))
+  if (Array.isArray(node))
+    return node.map((x, i) => replaceAllSettingsNodes(x, dict, stats, opts, used, [...path, i]))
   if (typeof node !== 'object') return node
 
   const out: any = {}
   for (const [k, v] of Object.entries(node)) {
     if (k === 'settings') {
       stats.settingsNodes += 1
-      out[k] = walk(v, dict, stats, opts, used)
+      out[k] = walk(v, dict, stats, opts, used, [...path, k], true)
     } else {
-      out[k] = replaceAllSettingsNodes(v, dict, stats, opts, used)
+      out[k] = replaceAllSettingsNodes(v, dict, stats, opts, used, [...path, k])
     }
   }
   return out
@@ -399,7 +517,9 @@ function replaceStringSmart(
   dict: BuiltDictionary,
   stats: ReplaceStats,
   opts: ReplaceOptions,
-  used: { all: Set<string>; exact: Set<string>; fuzzy: Set<string>; substring: Set<string> }
+  used: { all: Set<string>; exact: Set<string>; fuzzy: Set<string>; substring: Set<string> },
+  path: PathSegment[],
+  collectUnmatched: boolean
 ): string {
   const raw = input
   const t = normalizeText(raw)
@@ -492,7 +612,20 @@ function replaceStringSmart(
 
   stats.unmatched += 1
   if (stats.unmatchedSamples.length < opts.maxUnmatchedSamples) stats.unmatchedSamples.push(raw)
+  if (collectUnmatched && stats.unmatchedItems.length < 500) {
+    stats.unmatchedItems.push({ path, pathText: formatPath(path), value: raw })
+  }
   return raw
+}
+
+function formatPath(path: PathSegment[]): string {
+  // dot for object keys, [i] for array indices
+  let out = ''
+  for (const seg of path) {
+    if (typeof seg === 'number') out += `[${seg}]`
+    else out += out ? `.${seg}` : seg
+  }
+  return out
 }
 
 function recordReplacement(stats: ReplaceStats, before: string, after: string) {

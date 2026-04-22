@@ -12,7 +12,7 @@ import {
 } from './lib/excel'
 import { buildMappingsFromRow, buildQuotePairs, type MappingRecord } from './lib/mapping'
 import { buildDictionaryFromMappings } from './lib/dictionary'
-import { addNobrToJsonSettingsLastTwoWords, replaceJsonSettings } from './lib/jsonSettingsReplace'
+import { addNobrToJsonSettingsLastTwoWords, collectSettingsReplaceableLeaves, replaceJsonSettings } from './lib/jsonSettingsReplace'
 
 /** JSON 编辑区：textarea（无行号） */
 function JsonGutterTextarea(props: {
@@ -23,6 +23,7 @@ function JsonGutterTextarea(props: {
   textareaClassName?: string
   textareaRef?: RefObject<HTMLTextAreaElement | null>
   onPaste?: () => void
+  readOnly?: boolean
 }) {
   const rows = props.rows ?? 10
 
@@ -40,6 +41,7 @@ function JsonGutterTextarea(props: {
       onChange={(e) => props.onChange(e.target.value)}
       placeholder={props.placeholder}
       onPaste={props.onPaste ? () => props.onPaste?.() : undefined}
+      readOnly={props.readOnly}
     />
   )
 }
@@ -107,6 +109,15 @@ function App() {
     usedSourceKeysFuzzy: string[]
     usedSourceKeysSubstring: string[]
   } | null>(null)
+  const [jsonUnmatchedEdits, setJsonUnmatchedEdits] = useState<
+    Array<{
+      pathText: string
+      path: Array<string | number>
+      original: string
+      edited: string
+      status: 'todo' | 'done' | 'ignore'
+    }>
+  >([])
   const [jsonUnmatchedSamples, setJsonUnmatchedSamples] = useState<string[]>([])
   const [jsonDirection, setJsonDirection] = useState<'auto' | 'srcToDst' | 'dstToSrc'>('auto')
   const [jsonDictInfo, setJsonDictInfo] = useState<{ size: number; collisions: number } | null>(null)
@@ -891,6 +902,68 @@ function App() {
                   })
                   setJsonUnmatchedSamples(res.stats.unmatchedSamples)
 
+                  // Build editable list:
+                  // 1) real unmatched items from replace
+                  // 2) plus any settings string leaves that contain "unused mapping keys" (present in JSON but not applied)
+                  const unmatchedFromReplace = (res.stats.unmatchedItems ?? []).map((x) => ({
+                    pathText: x.pathText,
+                    path: x.path,
+                    original: x.value,
+                    edited: x.value,
+                    status: 'todo' as const,
+                  }))
+
+                  const beforeField = best.dir === 'srcToDst' ? 'src_text' : 'dst_text'
+                  const usableRows = mappingRecords.filter(
+                    (r) => r.row_status === 'OK' && r.segment_status === 'OK' && r.src_text && r.dst_text
+                  )
+                  const allKeys = new Set<string>()
+                  for (const r of usableRows) {
+                    const k = r[beforeField]
+                    if (k) allKeys.add(k)
+                  }
+                  const usedSet = new Set(res.stats.usedSourceKeys ?? [])
+                  const unusedKeySet = new Set<string>()
+                  for (const k of allKeys) {
+                    if (!usedSet.has(k)) unusedKeySet.add(k)
+                  }
+
+                  const leavesRes = collectSettingsReplaceableLeaves(jsonInput)
+                  const extra: typeof unmatchedFromReplace = []
+                  if (leavesRes.ok) {
+                    const stripTags = (s: string) => s.replace(/<[^>]*>/g, '')
+                    const norm = (s: string) =>
+                      stripTags(s)
+                        .replace(/\r\n/g, '\n')
+                        .replace(/\r/g, '\n')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                        .toLowerCase()
+
+                    // For performance: only consider keys with length >= 4
+                    const keys = Array.from(unusedKeySet).filter((k) => k && k.length >= 4)
+                    const keyNorms = keys.map((k) => norm(k)).filter(Boolean)
+                    const already = new Set(unmatchedFromReplace.map((x) => x.pathText))
+                    for (const leaf of leavesRes.leaves) {
+                      if (already.has(leaf.pathText)) continue
+                      const hayNorm = norm(leaf.value)
+                      if (!hayNorm) continue
+                      // robust check: any unused mapping key is a substring of the normalized leaf string
+                      if (keyNorms.some((k) => k && hayNorm.includes(k))) {
+                        extra.push({
+                          pathText: leaf.pathText,
+                          path: leaf.path,
+                          original: leaf.value,
+                          edited: leaf.value,
+                          status: 'todo' as const,
+                        })
+                        already.add(leaf.pathText)
+                      }
+                    }
+                  }
+
+                  setJsonUnmatchedEdits([...unmatchedFromReplace, ...extra])
+
                   if (res.stats.replaced === 0) {
                     setJsonToast(
                       '未替换任何字段：请检查替换方向是否选对，且 JSON.settings 的值需在映射表中可匹配（可展开查看未匹配示例）。'
@@ -919,6 +992,7 @@ function App() {
                   setJsonOutputEdited('')
                   setJsonError('')
                   setJsonStats(null)
+                  setJsonUnmatchedEdits([])
                 }}
               >
                 清空
@@ -952,6 +1026,7 @@ function App() {
                 onChange={setJsonOutputEdited}
                 rows={Math.max(6, jsonOutputLineCount)}
                 textareaClassName="jsonTextareaAutoHeight"
+                readOnly
               />
               {jsonStats ? (
                 <p className="help">
@@ -992,89 +1067,207 @@ function App() {
               <div className="help">
                 映射表总数：{mappingRecords.length} 条，已替换：{jsonStats.replaced} 条，未替换：{jsonUnmatchedMappings.length} 条
               </div>
-              {jsonUnmatchedMappings.length ? (
-                <div style={{ marginTop: 10 }}>
+              <div className="grid2" style={{ marginTop: 10 }}>
+                <div className="field">
                   <div className="unmatchedTableTitle">
-                    未应用的映射表
+                    未匹配字段（可编辑，仅 settings）（{jsonUnmatchedEdits.length} 条）
                   </div>
-                  <p className="help" style={{ marginTop: 6, marginBottom: 0 }}>
-                    下列记录在<strong>解析后的 JSON 里、且仅在与「应用映射」相同的 <code>settings</code> 可替换字符串范围内</strong>仍能匹配到「源/目标」文案，但<strong>未出现在本次替换统计的 before 列表中</strong>（或无法与替换结果对齐）。常见原因：技术字段整段跳过、替换方向与 JSON 语言不一致、或 Excel 与 JSON 规范化后仍有差异。
-                  </p>
-                  <input
-                    className="search"
-                    placeholder="搜索（EN/DE）"
-                    value={unmatchedQuery}
-                    onChange={(e) => setUnmatchedQuery(e.target.value)}
-                    style={{ marginTop: 8, marginBottom: 8 }}
-                  />
-                  <div className="tableWrap" role="region" aria-label="未应用映射列表">
-                    <table className="table unmatchedTable">
-                      <thead>
-                        <tr>
-                          <th>序号</th>
-                          <th>row</th>
-                          <th>{srcHeaderName || '源列'}</th>
-                          <th>{dstHeaderName || '目标列'}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredUnmatchedMappings.slice(0, 100).map((r, idx) => (
-                          <tr key={`${r.row_id}-${r.block_index}-${r.item_index}-${idx}`}>
-                            <td className="mono">{idx + 1}</td>
-                            <td className="mono">{r.row_id}</td>
-                            <td className="cell">
-                              <div
-                                className={`cellContent ${copiedCells.has(`unm-${r.row_id}-${r.block_index}-${r.item_index}-src`) ? 'copied' : ''}`}
-                              >
-                                <span>{r.src_text}</span>
-                                <button
-                                  className="copyIcon"
-                                  onClick={async () => {
-                                    const key = `unm-${r.row_id}-${r.block_index}-${r.item_index}-src`
-                                    await navigator.clipboard.writeText(r.src_text)
-                                    setCopiedCells((prev) => new Set([...prev, key]))
-                                    setCopyToast('源文本已复制')
-                                    window.setTimeout(() => setCopyToast(''), 1500)
-                                  }}
-                                  title="复制源文本"
-                                >
-                                  📋
-                                </button>
-                              </div>
-                            </td>
-                            <td className="cell">
-                              <div
-                                className={`cellContent ${copiedCells.has(`unm-${r.row_id}-${r.block_index}-${r.item_index}-dst`) ? 'copied' : ''}`}
-                              >
-                                <span>{r.dst_text}</span>
-                                <button
-                                  className="copyIcon"
-                                  onClick={async () => {
-                                    const key = `unm-${r.row_id}-${r.block_index}-${r.item_index}-dst`
-                                    await navigator.clipboard.writeText(r.dst_text)
-                                    setCopiedCells((prev) => new Set([...prev, key]))
-                                    setCopyToast('目标文本已复制')
-                                    window.setTimeout(() => setCopyToast(''), 1500)
-                                  }}
-                                  title="复制目标文本"
-                                >
-                                  📋
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
+                  {jsonUnmatchedEdits.length ? (
+                    <>
+                      <p className="help" style={{ marginTop: 6, marginBottom: 8 }}>
+                        下列为本次替换中未匹配到映射的字符串字段（已排除 CSS/ID/布尔/数字/URL 等技术字段）。你可以逐条修改，最后点击“写回到输出 JSON”。
+                      </p>
+                      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+                        <button
+                          className="btn btnPrimary"
+                          type="button"
+                          onClick={() => {
+                            try {
+                              const obj = JSON.parse(jsonOutputEdited || '{}')
+
+                              const setAtPath = (root: any, path: Array<string | number>, value: string) => {
+                                let cur: any = root
+                                for (let i = 0; i < path.length - 1; i++) {
+                                  const seg = path[i]!
+                                  if (cur == null) return
+                                  cur = cur[seg as any]
+                                }
+                                const last = path[path.length - 1]
+                                if (cur && last !== undefined) cur[last as any] = value
+                              }
+
+                              for (const it of jsonUnmatchedEdits) {
+                                if (it.status !== 'ignore' && it.edited !== it.original) setAtPath(obj, it.path, it.edited)
+                              }
+
+                              setJsonOutputEdited(JSON.stringify(obj, null, 2))
+                              setJsonToast('已写回未匹配字段')
+                              window.setTimeout(() => setJsonToast(''), 1500)
+                            } catch (e) {
+                              setJsonToast(e instanceof Error ? e.message : String(e))
+                              window.setTimeout(() => setJsonToast(''), 3000)
+                            }
+                          }}
+                        >
+                          写回到输出 JSON
+                        </button>
+                        <button className="btn" type="button" onClick={() => setJsonUnmatchedEdits([])}>
+                          清空未匹配列表
+                        </button>
+                      </div>
+
+                      <div className="unmatched" style={{ maxHeight: 520 }}>
+                        {jsonUnmatchedEdits.map((it, idx) => (
+                          <div key={`${it.pathText}-${idx}`} className="unmatchedItem">
+                        <div className="unmatchedItemHeader">
+                          <div className="unmatchedPath">
+                            <span className="unmatchedIndex">{idx + 1}.</span>
+                            {it.pathText}
+                          </div>
+                          <div className="unmatchedItemActions">
+                          <button
+                            type="button"
+                            className={`statusDot statusDot_${it.status}`}
+                            title={it.status === 'todo' ? '待处理' : it.status === 'done' ? '已修改' : '忽略'}
+                            aria-label={it.status === 'todo' ? '待处理' : it.status === 'done' ? '已修改' : '忽略'}
+                            onClick={() => {
+                              setJsonUnmatchedEdits((prev) =>
+                                prev.map((x, i) => {
+                                  if (i !== idx) return x
+                                  const next =
+                                    x.status === 'todo' ? 'ignore' : x.status === 'ignore' ? 'done' : 'todo'
+                                  return { ...x, status: next }
+                                })
+                              )
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="unmatchedRemove"
+                            title="移除该条"
+                            aria-label="移除该条"
+                            onClick={() => {
+                              setJsonUnmatchedEdits((prev) => prev.filter((_, i) => i !== idx))
+                            }}
+                          >
+                            ×
+                          </button>
+                          </div>
+                        </div>
+                            <textarea
+                              className="textarea textareaMono unmatchedEditTextarea"
+                              rows={3}
+                              value={it.edited}
+                              onChange={(e) => {
+                                const v = e.target.value
+                            setJsonUnmatchedEdits((prev) => prev.map((x, i) => (i === idx ? { ...x, edited: v } : x)))
+                              }}
+                              style={{ marginTop: 6 }}
+                            />
+                          </div>
                         ))}
-                      </tbody>
-                    </table>
-                    {filteredUnmatchedMappings.length > 100 ? (
-                      <div className="help">仅展示前 100 条未替换映射。</div>
-                    ) : null}
-                    {filteredUnmatchedMappings.length === 0 && unmatchedQuery.trim() ? (
-                      <div className="help">未找到匹配的映射。</div>
-                    ) : null}
-                  </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="help" style={{ marginTop: 6 }}>
+                      本次没有未匹配字段（或均被跳过）。
+                    </div>
+                  )}
                 </div>
-              ) : null}
+
+                <div className="field">
+                  <div className="unmatchedTableTitle">
+                    未应用的映射表{jsonUnmatchedMappings.length ? `（${jsonUnmatchedMappings.length} 条）` : ''}
+                  </div>
+                  {jsonUnmatchedMappings.length ? (
+                    <>
+                      <p className="help" style={{ marginTop: 6, marginBottom: 0 }}>
+                        下列记录在<strong>解析后的 JSON 里、且仅在与「应用映射」相同的 <code>settings</code> 可替换字符串范围内</strong>仍能匹配到「源/目标」文案，但<strong>未出现在本次替换统计的 before 列表中</strong>（或无法与替换结果对齐）。常见原因：技术字段整段跳过、替换方向与 JSON 语言不一致、或 Excel 与 JSON 规范化后仍有差异。
+                      </p>
+                      <input
+                        className="search"
+                        placeholder="搜索（EN/DE）"
+                        value={unmatchedQuery}
+                        onChange={(e) => setUnmatchedQuery(e.target.value)}
+                        style={{ marginTop: 8, marginBottom: 8 }}
+                      />
+                      <div className="tableWrap" role="region" aria-label="未应用映射列表">
+                        <table className="table unmatchedTable">
+                          <caption className="tableCaption">
+                            未应用映射表{jsonUnmatchedMappings.length ? `（${jsonUnmatchedMappings.length} 条）` : ''}
+                          </caption>
+                          <thead>
+                            <tr>
+                              <th>序号</th>
+                              <th>row</th>
+                              <th>{srcHeaderName || '源列'}</th>
+                              <th>{dstHeaderName || '目标列'}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredUnmatchedMappings.slice(0, 100).map((r, idx) => (
+                              <tr key={`${r.row_id}-${r.block_index}-${r.item_index}-${idx}`}>
+                                <td className="mono">{idx + 1}</td>
+                                <td className="mono">{r.row_id}</td>
+                                <td className="cell">
+                                  <div
+                                    className={`cellContent ${copiedCells.has(`unm-${r.row_id}-${r.block_index}-${r.item_index}-src`) ? 'copied' : ''}`}
+                                  >
+                                    <span>{r.src_text}</span>
+                                    <button
+                                      className="copyIcon"
+                                      onClick={async () => {
+                                        const key = `unm-${r.row_id}-${r.block_index}-${r.item_index}-src`
+                                        await navigator.clipboard.writeText(r.src_text)
+                                        setCopiedCells((prev) => new Set([...prev, key]))
+                                        setCopyToast('源文本已复制')
+                                        window.setTimeout(() => setCopyToast(''), 1500)
+                                      }}
+                                      title="复制源文本"
+                                    >
+                                      📋
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="cell">
+                                  <div
+                                    className={`cellContent ${copiedCells.has(`unm-${r.row_id}-${r.block_index}-${r.item_index}-dst`) ? 'copied' : ''}`}
+                                  >
+                                    <span>{r.dst_text}</span>
+                                    <button
+                                      className="copyIcon"
+                                      onClick={async () => {
+                                        const key = `unm-${r.row_id}-${r.block_index}-${r.item_index}-dst`
+                                        await navigator.clipboard.writeText(r.dst_text)
+                                        setCopiedCells((prev) => new Set([...prev, key]))
+                                        setCopyToast('目标文本已复制')
+                                        window.setTimeout(() => setCopyToast(''), 1500)
+                                      }}
+                                      title="复制目标文本"
+                                    >
+                                      📋
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {filteredUnmatchedMappings.length > 100 ? (
+                          <div className="help">仅展示前 100 条未替换映射。</div>
+                        ) : null}
+                        {filteredUnmatchedMappings.length === 0 && unmatchedQuery.trim() ? (
+                          <div className="help">未找到匹配的映射。</div>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="help" style={{ marginTop: 6 }}>
+                      本次没有未应用映射。
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           ) : null}
 

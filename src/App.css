@@ -88,8 +88,8 @@
 
 /* Dark theme overrides */
 :root[data-theme='dark'] .app {
-  background: #0b1020;
-  color: #e7eaf3;
+  background: #0b1220;
+  color: #e5e7eb;
 }
 
 :root[data-theme='dark'] .app h1,
@@ -99,30 +99,30 @@
 :root[data-theme='dark'] .app p,
 :root[data-theme='dark'] .app th,
 :root[data-theme='dark'] .app td {
-  color: #e7eaf3;
+  color: #e5e7eb;
 }
 
 :root[data-theme='dark'] .app code {
-  color: rgba(231, 234, 243, 0.95);
-  background: rgba(255, 255, 255, 0.06);
+  color: rgba(226, 232, 240, 0.98);
+  background: rgba(226, 232, 240, 0.08);
 }
 
 :root[data-theme='dark'] .app ::placeholder {
-  color: rgba(231, 234, 243, 0.45);
+  color: rgba(226, 232, 240, 0.55);
 }
 
 :root[data-theme='dark'] .header {
-  background: rgba(11, 16, 32, 0.72);
-  border-bottom: 1px solid rgba(231, 234, 243, 0.1);
+  background: rgba(11, 18, 32, 0.78);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.12);
 }
 
 :root[data-theme='dark'] .subtle {
-  color: rgba(231, 234, 243, 0.72);
+  color: rgba(226, 232, 240, 0.78);
 }
 
 :root[data-theme='dark'] .card {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(231, 234, 243, 0.1);
+  background: rgba(15, 23, 42, 0.82);
+  border: 1px solid rgba(226, 232, 240, 0.12);
 }
 
 :root[data-theme='dark'] .field input[type='file'],
@@ -131,104 +131,104 @@
 :root[data-theme='dark'] .textarea,
 :root[data-theme='dark'] .search,
 :root[data-theme='dark'] .selectSlim {
-  border-color: rgba(231, 234, 243, 0.12);
-  background: rgba(11, 16, 32, 0.6);
-  color: #e7eaf3;
+  border-color: rgba(226, 232, 240, 0.14);
+  background: rgba(2, 6, 23, 0.55);
+  color: rgba(226, 232, 240, 0.98);
 }
 
 :root[data-theme='dark'] .gutter {
-  border-color: rgba(231, 234, 243, 0.12);
-  background: rgba(11, 16, 32, 0.35);
-  color: rgba(231, 234, 243, 0.55);
+  border-color: rgba(226, 232, 240, 0.14);
+  background: rgba(2, 6, 23, 0.35);
+  color: rgba(226, 232, 240, 0.7);
 }
 
 :root[data-theme='dark'] .help {
-  color: rgba(231, 234, 243, 0.65);
+  color: rgba(226, 232, 240, 0.78);
 }
 
 :root[data-theme='dark'] .arrow {
-  color: rgba(231, 234, 243, 0.7);
+  color: rgba(226, 232, 240, 0.78);
 }
 
 :root[data-theme='dark'] .placeholder {
-  border-color: rgba(231, 234, 243, 0.18);
-  color: rgba(231, 234, 243, 0.7);
+  border-color: rgba(226, 232, 240, 0.18);
+  color: rgba(226, 232, 240, 0.82);
 }
 
 :root[data-theme='dark'] .tableWrap {
-  border-color: rgba(231, 234, 243, 0.12);
+  border-color: rgba(226, 232, 240, 0.14);
 }
 
 :root[data-theme='dark'] .table thead th {
-  background: rgba(11, 16, 32, 0.92);
-  color: rgba(231, 234, 243, 0.72);
-  border-bottom-color: rgba(231, 234, 243, 0.12);
+  background: rgba(2, 6, 23, 0.9);
+  color: rgba(226, 232, 240, 0.86);
+  border-bottom-color: rgba(226, 232, 240, 0.14);
 }
 
 :root[data-theme='dark'] .table tbody td {
-  border-bottom-color: rgba(231, 234, 243, 0.06);
+  border-bottom-color: rgba(226, 232, 240, 0.08);
 }
 
 :root[data-theme='dark'] .table tbody tr:nth-child(odd) td {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 :root[data-theme='dark'] .table tbody tr:nth-child(even) td {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 :root[data-theme='dark'] .table tbody tr:hover td {
-  background: rgba(37, 99, 235, 0.18);
+  background: rgba(37, 99, 235, 0.22);
 }
 
 :root[data-theme='dark'] .mono {
-  color: rgba(231, 234, 243, 0.85);
+  color: rgba(226, 232, 240, 0.9);
 }
 
 :root[data-theme='dark'] .cell {
-  color: rgba(231, 234, 243, 0.92);
+  color: rgba(226, 232, 240, 0.96);
 }
 
 :root[data-theme='dark'] .notes {
-  color: rgba(231, 234, 243, 0.65);
+  color: rgba(226, 232, 240, 0.8);
 }
 
 :root[data-theme='dark'] .unmatched {
-  border-color: rgba(231, 234, 243, 0.12);
-  background: rgba(11, 16, 32, 0.35);
+  border-color: rgba(226, 232, 240, 0.14);
+  background: rgba(2, 6, 23, 0.35);
 }
 
 :root[data-theme='dark'] .unmatchedItem {
-  color: rgba(231, 234, 243, 0.75);
-  border-bottom-color: rgba(231, 234, 243, 0.06);
+  color: rgba(226, 232, 240, 0.9);
+  border-bottom-color: rgba(226, 232, 240, 0.1);
 }
 
 :root[data-theme='dark'] .codeBox {
-  border-color: rgba(231, 234, 243, 0.12);
-  background: rgba(11, 16, 32, 0.6);
-  color: #e7eaf3;
+  border-color: rgba(226, 232, 240, 0.14);
+  background: rgba(2, 6, 23, 0.55);
+  color: rgba(226, 232, 240, 0.98);
 }
 
 :root[data-theme='dark'] .dimLine {
-  color: rgba(231, 234, 243, 0.45);
+  color: rgba(226, 232, 240, 0.6);
 }
 
 :root[data-theme='dark'] .footer {
-  color: rgba(231, 234, 243, 0.7);
+  color: rgba(226, 232, 240, 0.78);
 }
 
 :root[data-theme='dark'] .btn {
-  border-color: rgba(231, 234, 243, 0.16);
-  background: rgba(231, 234, 243, 0.08);
-  color: #e7eaf3;
+  border-color: rgba(226, 232, 240, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(226, 232, 240, 0.98);
   box-shadow:
     0 1px 0 rgba(0, 0, 0, 0.2),
     0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
 :root[data-theme='dark'] .btn:not(:disabled):hover {
-  background: rgba(231, 234, 243, 0.12);
-  border-color: rgba(231, 234, 243, 0.28);
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(226, 232, 240, 0.3);
 }
 
 .card {
@@ -531,6 +531,17 @@
   table-layout: fixed;
 }
 
+.tableCaption {
+  caption-side: top;
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.92);
+  background: rgba(15, 23, 42, 0.03);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.1);
+}
+
 .unmatchedTableTitle {
   margin-bottom: 8px;
   font-size: 14px;
@@ -538,11 +549,28 @@
   color: rgba(15, 23, 42, 0.95);
 }
 
-.unmatchedTable th:nth-child(-n+2),
-.unmatchedTable td:nth-child(-n+2) {
-  width: 56px;
-  max-width: 56px;
-  min-width: 48px;
+/* Unused mapping table: keep index+row compact (~20% total) */
+.unmatchedTable th:nth-child(1),
+.unmatchedTable td:nth-child(1) {
+  width: 8%;
+  max-width: 8%;
+  min-width: 44px;
+}
+
+.unmatchedTable th:nth-child(2),
+.unmatchedTable td:nth-child(2) {
+  width: 12%;
+  max-width: 12%;
+  min-width: 56px;
+}
+
+/* Let text columns take the remaining space */
+.unmatchedTable th:nth-child(3),
+.unmatchedTable td:nth-child(3),
+.unmatchedTable th:nth-child(4),
+.unmatchedTable td:nth-child(4) {
+  width: auto;
+  max-width: none;
 }
 
 .table thead th:nth-child(-n+4),
@@ -550,6 +578,14 @@
   width: 56px;
   max-width: 56px;
   min-width: 48px;
+}
+
+/* Override the global fixed widths for the unused-mapping table */
+.unmatchedTable thead th:nth-child(-n+4),
+.unmatchedTable tbody td:nth-child(-n+4) {
+  width: auto;
+  max-width: none;
+  min-width: 0;
 }
 
 .table tbody td,
@@ -709,6 +745,102 @@
 
 .unmatchedItem:last-child {
   border-bottom: none;
+}
+
+.unmatchedItemHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.unmatchedItemActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.unmatchedPath {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  word-break: break-all;
+}
+
+.unmatchedIndex {
+  display: inline-block;
+  min-width: 2.6em;
+  color: rgba(15, 23, 42, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme='dark'] .unmatchedIndex {
+  color: rgba(226, 232, 240, 0.65);
+}
+
+.unmatchedRemove {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  background: rgba(15, 23, 42, 0.04);
+  color: rgba(15, 23, 42, 0.75);
+  cursor: pointer;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.unmatchedRemove:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: rgba(153, 27, 27, 0.9);
+}
+
+:root[data-theme='dark'] .unmatchedRemove {
+  border-color: rgba(226, 232, 240, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(226, 232, 240, 0.78);
+}
+
+:root[data-theme='dark'] .unmatchedRemove:hover {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: rgba(254, 202, 202, 0.95);
+}
+
+.statusDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.28);
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+}
+
+.statusDot_todo {
+  background: #ef4444;
+}
+
+.statusDot_done {
+  background: #22c55e;
+}
+
+.statusDot_ignore {
+  background: #f59e0b;
+}
+
+:root[data-theme='dark'] .statusDot {
+  border-color: rgba(226, 232, 240, 0.28);
+  box-shadow: 0 0 0 2px rgba(2, 6, 23, 0.9);
+}
+
+.unmatchedEditTextarea {
+  resize: vertical;
+  min-height: 72px;
+  max-height: 520px;
 }
 
 .codeBox {
