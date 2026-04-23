@@ -612,7 +612,7 @@ function App() {
             <li>
             对于修改了 Excel 后仍存在非 OK 的记录，只能在第三步「应用映射」得到替换后的 JSON 基础上人工排查替换。第三步应用映射后会输出未应用的映射表，可按表上记录逐条人工替换。
           </li>
-          <li>把新的翻译好的json更新到shiopiy后，可在浏览器转换翻译成英文版本方便核对；刷新映射按钮如按了无反应，请刷新页面重来</li>
+          <li>把新的翻译好的json跟原始的json对比，人工过滤一次后再粘贴到shopify中,更好地避免漏翻译的地方；刷新映射按钮如按了无反应，请刷新页面重来</li>
           </ul>
           <div className="row mappingResultToolbar">
             <input
