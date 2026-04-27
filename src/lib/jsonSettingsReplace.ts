@@ -395,25 +395,37 @@ function addNobrToLastTwoWords(input: string, stats: NobrStats, opts: ReplaceOpt
 
 function wrapTailWordsWithNobr(input: string): string {
   // We consider "words" as letter/number sequences (allowing internal hyphens).
-  const words = input.match(/[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu) ?? []
-  // Only apply when there are more than 3 words in the text.
-  if (words.length <= 3) return input
+  // Important: allow punctuation BETWEEN the last two words (e.g. "rapport : X123"),
+  // so we find the last two word matches by index and wrap the exact original slice.
+  const wordRe = /[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu
 
   // Preserve leading/trailing whitespace (including newlines) so HTML text tokens keep formatting.
   const lead = input.match(/^\s+/u)?.[0] ?? ''
   const trail = input.match(/\s+$/u)?.[0] ?? ''
   const core = input.slice(lead.length, input.length - trail.length)
 
-  // Match across newlines: use [\s\S] instead of dot (.) so wrapped Excel lines still work.
-  const m = core.match(
-    /^([\s\S]*?)(\b[\p{L}\p{N}][\p{L}\p{N}-]*\s+[\p{L}\p{N}][\p{L}\p{N}-]*)(\s*[)\]}>"'“”’]*\s*[.!?,;:]*)$/u
-  )
-  if (!m) return input
-  const head = m[1] ?? ''
-  const tailWords = m[2] ?? ''
-  const trailer = m[3] ?? ''
-  if (!tailWords.includes(' ')) return input
-  return `${lead}${head}<nobr>${tailWords}</nobr>${trailer}${trail}`
+  const matches = Array.from(core.matchAll(wordRe))
+  // Only apply when there are more than 3 words in the text.
+  if (matches.length <= 3) return input
+
+  const last = matches[matches.length - 1]
+  const prev = matches[matches.length - 2]
+  if (!last || !prev) return input
+
+  const start = prev.index ?? -1
+  const end = (last.index ?? -1) + last[0].length
+  if (start < 0 || end < 0 || end <= start) return input
+
+  const head = core.slice(0, start)
+  const betweenAndLast = core.slice(start, end)
+  const after = core.slice(end)
+
+  // Attach punctuation that is immediately after the last word (no spaces),
+  // e.g. "stable." => include "." inside <nobr>.
+  const attach = after.match(/^[)\]}>"'“”’]*[.!?,;:]+/u)?.[0] ?? ''
+  const rest = after.slice(attach.length)
+
+  return `${lead}${head}<nobr>${betweenAndLast}${attach}</nobr>${rest}${trail}`
 }
 
 function addNobrPreserveHtmlTags(input: string): string {
